@@ -1,0 +1,74 @@
+.main {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.hero {
+  padding: 1.5rem 0 0.5rem;
+}
+
+.kicker {
+  margin: 0 0 0.6rem;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(3.5rem, 12vw, 7rem);
+  font-weight: 560;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+}
+
+.lede {
+  max-width: 40rem;
+  margin: 1.25rem 0 0;
+  color: var(--ink-soft);
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.market {
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-radius: 1.25rem;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.market h2 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 560;
+}
+
+.market .kicker {
+  color: #e7b8a2;
+}
+
+.empty {
+  padding: 1.25rem;
+  border: 1px dashed rgb(255 250 243 / 35%);
+  border-radius: 1rem;
+}
+
+.empty p {
+  margin: 0;
+}
+
+@media (min-width: 800px) {
+  .market {
+    grid-template-columns: 16rem 1fr;
+    align-items: center;
+  }
+}

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Test the services
+        run: chmod +x mvnw && ./mvnw -B test
+
+  storefront:
+    name: Storefront
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/storefront
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/storefront/package-lock.json
+
+      - name: Install, lint, and build
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Helm 4.3.1
+        run: |
+          curl -fsSL "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
+
+      - name: Lint the chart
+        run: helm lint infrastructure/helm/bazaar
+
+  images:
+    name: Image ${{ matrix.name }}
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api-gateway
+            dockerfile: services/api-gateway/Dockerfile
+          - name: identity-service
+            dockerfile: services/identity-service/Dockerfile
+          - name: catalog-service
+            dockerfile: services/catalog-service/Dockerfile
+          - name: inventory-service
+            dockerfile: services/inventory-service/Dockerfile
+          - name: order-service
+            dockerfile: services/order-service/Dockerfile
+          - name: payment-service
+            dockerfile: services/payment-service/Dockerfile
+          - name: storefront
+            dockerfile: apps/storefront/Dockerfile
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: false
+          provenance: false
+          tags: bazaar-${{ matrix.name }}:ci

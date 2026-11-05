@@ -1,0 +1,124 @@
+name: bazaar
+
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: bazaar-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: "8080"
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      IDENTITY_SERVICE_URL: http://identity-service:8080
+      CATALOG_SERVICE_URL: http://catalog-service:8080
+      INVENTORY_SERVICE_URL: http://inventory-service:8080
+      ORDER_SERVICE_URL: http://order-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:8080
+    depends_on:
+      identity-service:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: services/identity-service/Dockerfile
+    image: bazaar-identity-service
+    ports:
+      - "8081:8080"
+    environment:
+      SERVER_PORT: "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: services/catalog-service/Dockerfile
+    image: bazaar-catalog-service
+    ports:
+      - "8082:8080"
+    environment:
+      SERVER_PORT: "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: services/inventory-service/Dockerfile
+    image: bazaar-inventory-service
+    ports:
+      - "8083:8080"
+    environment:
+      SERVER_PORT: "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    image: bazaar-order-service
+    ports:
+      - "8084:8080"
+    environment:
+      SERVER_PORT: "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    image: bazaar-payment-service
+    ports:
+      - "8085:8080"
+    environment:
+      SERVER_PORT: "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  storefront:
+    build:
+      context: .
+      dockerfile: apps/storefront/Dockerfile
+    image: bazaar-storefront
+    ports:
+      - "3000:3000"
+    environment:
+      API_GATEWAY_URL: http://api-gateway:8080
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+networks:
+  bazaar:
+    name: bazaar

@@ -1,0 +1,108 @@
+# Local kind values. Image names match the tags produced by docker compose build.
+# Leave registry empty so the chart uses those local tags. A remote cluster sets
+# registry, tag, pullPolicy, and imagePullSecrets in a separate values file.
+
+replicaCount: 1
+
+image:
+  registry: ""
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Names of Secrets that already exist in the namespace. The chart does not create them.
+imagePullSecrets: []
+
+# Optional Secret whose keys become environment variables. Create it in the cluster.
+# Phase 1 has no credentials to put in Git.
+envFromSecret: ""
+
+# Set during an upgrade to roll every pod without changing the image.
+revision: ""
+
+java:
+  terminationGracePeriodSeconds: 30
+  toolOptions: "-XX:MaxRAMPercentage=75.0"
+
+storefront:
+  terminationGracePeriodSeconds: 20
+
+resources:
+  java:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  storefront:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+# Non-sensitive addresses. Kubernetes DNS names match the Compose service names.
+config:
+  SERVER_PORT: "8080"
+  CORS_ALLOWED_ORIGINS: http://localhost:3000
+  API_GATEWAY_URL: http://api-gateway:8080
+  IDENTITY_SERVICE_URL: http://identity-service:8080
+  CATALOG_SERVICE_URL: http://catalog-service:8080
+  INVENTORY_SERVICE_URL: http://inventory-service:8080
+  ORDER_SERVICE_URL: http://order-service:8080
+  PAYMENT_SERVICE_URL: http://payment-service:8080
+  PORT: "3000"
+  HOSTNAME: 0.0.0.0
+
+applications:
+  api-gateway:
+    image: bazaar-api-gateway
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+      - CORS_ALLOWED_ORIGINS
+      - IDENTITY_SERVICE_URL
+      - CATALOG_SERVICE_URL
+      - INVENTORY_SERVICE_URL
+      - ORDER_SERVICE_URL
+      - PAYMENT_SERVICE_URL
+  identity-service:
+    image: bazaar-identity-service
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+  catalog-service:
+    image: bazaar-catalog-service
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+  inventory-service:
+    image: bazaar-inventory-service
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+  order-service:
+    image: bazaar-order-service
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+  payment-service:
+    image: bazaar-payment-service
+    port: 8080
+    runtime: java
+    env:
+      - SERVER_PORT
+  storefront:
+    image: bazaar-storefront
+    port: 3000
+    runtime: node
+    env:
+      - API_GATEWAY_URL
+      - PORT
+      - HOSTNAME

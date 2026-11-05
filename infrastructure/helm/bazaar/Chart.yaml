@@ -1,0 +1,7 @@
+apiVersion: v2
+name: bazaar
+description: Phase 1 skeleton for the BAZAAR marketplace
+type: application
+version: 0.1.0
+appVersion: 0.1.0-SNAPSHOT
+kubeVersion: ">=1.34.0-0"

@@ -1,0 +1,10 @@
+BAZAAR is installed in namespace {{ .Release.Namespace }}.
+
+Forward the storefront and the gateway from WSL:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/storefront 3000:3000
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/api-gateway 8080:8080
+
+Then open http://localhost:3000 and http://localhost:8080/actuator/health.
+
+Image pull secrets and runtime secrets are not created by this chart. Set imagePullSecrets or envFromSecret to the name of a Secret that already exists in the namespace.

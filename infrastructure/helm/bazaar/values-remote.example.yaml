@@ -1,0 +1,15 @@
+# Example only. Do not commit a pull secret or any real credential.
+# Copy this file, replace the owner and tag, create the Secret in the cluster, then:
+#   helm upgrade --install bazaar infrastructure/helm/bazaar \
+#     --namespace bazaar --create-namespace \
+#     --values infrastructure/helm/bazaar/values-remote.example.yaml
+
+image:
+  registry: ghcr.io/lecongnhat247
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: ghcr-pull
+
+envFromSecret: ""
