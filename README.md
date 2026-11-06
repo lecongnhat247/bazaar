@@ -1,6 +1,6 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 adds the purchase journey one milestone at a time. Catalog, inventory, checkout, and payment behavior are still later milestones.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 adds the purchase journey one milestone at a time. Inventory, checkout, and payment behavior are still later milestones.
 
 ## Phase 1
 
@@ -20,7 +20,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | --- | --- | --- |
 | M0 | Existing project audit | Complete |
 | M1 | Database and security foundation | Complete |
-| M2 | Catalog | Not started |
+| M2 | Catalog | Complete |
 | M3 | Inventory | Not started |
 | M4 | Payment | Not started |
 | M5 | Order | Not started |

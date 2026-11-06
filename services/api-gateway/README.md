@@ -33,6 +33,8 @@ The process listens on port 8080 unless `SERVER_PORT` is set.
 | GET | `/actuator/health/readiness` | Readiness probe |
 | GET | `/api/v1/identity/**` | Forwarded to the identity service |
 | GET | `/api/v1/catalog/**` | Forwarded to the catalog service |
+| GET | `/api/v1/categories/**` | Forwarded to the catalog service |
+| GET | `/api/v1/products/**` | Forwarded to the catalog service |
 | GET | `/api/v1/inventory/**` | Forwarded to the inventory service |
 | GET | `/api/v1/orders/**` | Forwarded to the order service |
 | GET | `/api/v1/payments/**` | Forwarded to the payment service |

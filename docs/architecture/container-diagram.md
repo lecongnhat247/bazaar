@@ -1,6 +1,6 @@
 # Container diagram
 
-This is the Phase 1 application architecture. Every container is stateless. None of them has a database.
+This is the application path from the browser to each service. Catalog stores products in its own PostgreSQL database. The gateway and the storefront do not.
 
 ```mermaid
 flowchart TB
@@ -24,6 +24,8 @@ flowchart TB
   storefront -->|GET /actuator/health via API_GATEWAY_URL| gateway
   gateway -->|/api/v1/identity/**| identity
   gateway -->|/api/v1/catalog/**| catalog
+  gateway -->|/api/v1/categories/**| catalog
+  gateway -->|/api/v1/products/**| catalog
   gateway -->|/api/v1/inventory/**| inventory
   gateway -->|/api/v1/orders/**| orders
   gateway -->|/api/v1/payments/**| payments
@@ -37,6 +39,8 @@ The ports in the internal tier are container ports. On a laptop, those processes
 | --- | --- |
 | `/api/v1/identity/**` | `IDENTITY_SERVICE_URL` |
 | `/api/v1/catalog/**` | `CATALOG_SERVICE_URL` |
+| `/api/v1/categories/**` | `CATALOG_SERVICE_URL` |
+| `/api/v1/products/**` | `CATALOG_SERVICE_URL` |
 | `/api/v1/inventory/**` | `INVENTORY_SERVICE_URL` |
 | `/api/v1/orders/**` | `ORDER_SERVICE_URL` |
 | `/api/v1/payments/**` | `PAYMENT_SERVICE_URL` |

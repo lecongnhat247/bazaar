@@ -29,6 +29,14 @@ spring:
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:
                 - Path=/api/v1/catalog/**
+            - id: categories
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/categories/**
+            - id: products
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/products/**
             - id: inventory
               uri: ${INVENTORY_SERVICE_URL:http://localhost:8083}
               predicates:

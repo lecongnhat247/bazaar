@@ -57,7 +57,7 @@ class GatewayApplicationTests {
     void routesPointAtConfiguredServices() {
         var ids = routeLocator.getRoutes().map(route -> route.getId()).collectList().block();
         assertThat(ids).containsExactlyInAnyOrder(
-                "identity", "catalog", "inventory", "orders", "payments");
+                "identity", "catalog", "categories", "products", "inventory", "orders", "payments");
     }
 
     @Test

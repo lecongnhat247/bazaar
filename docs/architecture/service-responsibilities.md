@@ -40,9 +40,9 @@ Phase 2 stores a profile for the Keycloak subject and the application roles `CUS
 | Port | 8080 in a container, 8082 as a local process |
 | Data | PostgreSQL `catalog_db`. JSONB is the planned store for category-specific attributes. See [ADR-006](../adr/ADR-006-catalog-postgresql.md). |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`. Both stay public.
 
-Later, this service owns products, categories, image metadata, search, and flexible category-specific attributes. Stock quantities stay out of the catalog.
+Phase 2 stores categories, products, image metadata, and flexible attributes in JSONB. Customers with a token see `ACTIVE` products only. A seller creates a product as `DRAFT` and publishes it with a status change. The seller id comes from the token. Stock quantities stay in inventory. There is no product variant in this milestone.
 
 ## Inventory Service
 

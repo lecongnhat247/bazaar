@@ -1,11 +1,12 @@
 # Catalog Service
 
-Spring Boot service for the BAZAAR catalog. Product management is a later milestone. This process owns `catalog_db`, validates Keycloak JWTs, and leaves health and `/api/v1/catalog/info` public.
+Owns categories, products, image metadata, and flexible product attributes. Stock quantities belong to the inventory service. Keycloak issues tokens. This service checks the seller id from the token, not from the request body.
 
 ## Requirements
 
 - JDK 25 on `JAVA_HOME`
 - Maven Wrapper at the repository root
+- PostgreSQL for a local run. `./mvnw test` starts its own database with Testcontainers.
 
 ## Build and test
 
@@ -22,16 +23,22 @@ export JAVA_HOME="/c/Program Files/Java/jdk-25.0.5.0.3"
 ./mvnw -pl services/catalog-service -am spring-boot:run
 ```
 
-The process listens on port 8082 unless `SERVER_PORT` is set.
+The process listens on port 8082 unless `SERVER_PORT` is set. A local run needs `catalog_db` and a Keycloak issuer. Compose provides both.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/actuator/health` | Process health |
-| GET | `/actuator/health/liveness` | Liveness probe |
-| GET | `/actuator/health/readiness` | Readiness probe |
-| GET | `/api/v1/catalog/info` | Service name, version, and status |
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/actuator/health` | Public | Process health |
+| GET | `/api/v1/catalog/info` | Public | Service name, version, and status |
+| GET | `/api/v1/categories` | Bearer JWT | List categories |
+| GET | `/api/v1/products` | Bearer JWT | Search active products. Sellers pass `mine=true` to see their own drafts |
+| GET | `/api/v1/products/{id}` | Bearer JWT | One product. Drafts are visible to the owner and an admin |
+| POST | `/api/v1/products` | Seller or admin | Create a draft. The seller id is the token subject |
+| PUT | `/api/v1/products/{id}` | Owner or admin | Replace the editable fields. Status stays unchanged |
+| PATCH | `/api/v1/products/{id}/status` | Owner or admin | Move among `DRAFT`, `ACTIVE`, `INACTIVE`, and `ARCHIVED` |
+
+List parameters are `page`, `size` (max 50), `sort` (`createdAt`, `name`, `price`), `direction` (`asc` or `desc`), `q`, `categoryId`, `minPrice`, `maxPrice`, `status`, and `mine`. Customers always receive `ACTIVE` products. A new product starts as `DRAFT`. `ARCHIVED` is final.
 
 ## Configuration
 
@@ -46,4 +53,4 @@ The process listens on port 8082 unless `SERVER_PORT` is set.
 
 ## Versions
 
-Java 25 and Spring Boot 4.1.2 are pinned in the parent POM.
+Java 25 and Spring Boot 4.1.2 are pinned in the parent POM. Schema changes go through Flyway. Hibernate `ddl-auto` is `none`.
