@@ -1,10 +1,8 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 builds a deployable skeleton: documentation, six Spring Boot service shells, a Next.js storefront shell, Docker Compose, a local kind cluster, and GitHub Actions. Business features such as registration, catalog management, checkout, and payment processing come later.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 adds the purchase journey one milestone at a time. Catalog, inventory, checkout, and payment behavior are still later milestones.
 
-This repository is at **M6 — CI and deployment guides**. The services, storefront, Compose stack, Helm chart, and GitHub Actions workflows are in the tree.
-
-## Current milestone
+## Phase 1
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
@@ -15,6 +13,19 @@ This repository is at **M6 — CI and deployment guides**. The services, storefr
 | M4 | Docker Compose | Complete |
 | M5 | kind and Helm | Complete |
 | M6 | CI and deployment guides | Complete |
+
+## Phase 2
+
+| Milestone | Scope | Status |
+| --- | --- | --- |
+| M0 | Existing project audit | Complete |
+| M1 | Database and security foundation | Complete |
+| M2 | Catalog | Not started |
+| M3 | Inventory | Not started |
+| M4 | Payment | Not started |
+| M5 | Order | Not started |
+| M6 | Storefront | Not started |
+| M7 | Integration | Not started |
 
 ## Documentation
 
@@ -35,6 +46,7 @@ This repository is at **M6 — CI and deployment guides**. The services, storefr
 - [ADR-003 REST communication](docs/adr/ADR-003-rest-communication.md)
 - [ADR-004 Docker and Kubernetes](docs/adr/ADR-004-docker-and-kubernetes.md)
 - [ADR-005 Database ownership](docs/adr/ADR-005-database-ownership.md)
+- [ADR-006 Catalog on PostgreSQL](docs/adr/ADR-006-catalog-postgresql.md)
 
 ## Planned applications
 
@@ -52,7 +64,7 @@ Inside Compose and Kubernetes every backend container listens on port 8080. The 
 
 ## Configuration
 
-Copy [`.env.example`](.env.example) to `.env` when the applications exist. `.env` is gitignored. Phase 1 has no secrets. Required variable names are listed in `.env.example` and in the [deployment architecture](docs/architecture/deployment-architecture.md).
+Copy [`.env.example`](.env.example) to `.env` for a local process. `.env` is gitignored. Database and Keycloak passwords in that example are for the local machine only.
 
 Local Java builds need `JAVA_HOME` pointed at the installed JDK 25 for that shell. The operating-system environment was left unchanged. See the [setup guide](docs/development/setup.md).
 
@@ -86,6 +98,8 @@ bazaar/
 ├── infrastructure/
 │   ├── kind/
 │   ├── helm/bazaar/
+│   ├── postgres/
+│   ├── keycloak/
 │   └── scripts/
 ├── services/
 │   ├── api-gateway/

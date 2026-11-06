@@ -1,6 +1,6 @@
 # Payment Service
 
-Spring Boot skeleton for the BAZAAR payment bounded context. Payment simulation is later work. This process exposes health and a service info endpoint.
+Spring Boot service for BAZAAR payments. Payment simulation is a later milestone. This process owns `payment_db`, validates Keycloak JWTs, and leaves health and `/api/v1/payments/info` public.
 
 ## Requirements
 
@@ -38,6 +38,11 @@ The process listens on port 8085 unless `SERVER_PORT` is set.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SERVER_PORT` | `8085` | HTTP port |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/payment_db` | This service's database |
+| `DB_USERNAME` | `payment_user` | Database user |
+| `DB_PASSWORD` | `payment_local` | Local database password |
+| `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
+| `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
 
 ## Versions
 

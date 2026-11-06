@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Superseded in part: the catalog store is PostgreSQL from Phase 2. See [ADR-006](ADR-006-catalog-postgresql.md).
 
 ## Context
 

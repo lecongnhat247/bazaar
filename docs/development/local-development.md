@@ -2,7 +2,7 @@
 
 This is the day-to-day path on the development machine. Tool versions and the reason for each choice are in the [setup guide](setup.md).
 
-Phase 1 has no database, broker, or account. A service is ready when its health endpoint responds and, for the five backend services, its info endpoint responds.
+A service is ready when its health endpoint responds and, for the five backend services, its info endpoint responds. Those two paths stay public. Any other business path requires a Keycloak JWT. Unit tests start PostgreSQL with Testcontainers and do not start Keycloak. A full login uses Compose.
 
 ## Backend
 
@@ -43,4 +43,4 @@ Docker Desktop has about 7.6 GiB. Compose and kind together do not fit that budg
 
 ## Configuration
 
-Root [`.env.example`](../../.env.example) lists the Phase 1 variable names. There are no secrets. Addresses change by environment, and the same variable names are used for a local process, Compose, and Kubernetes.
+Root [`.env.example`](../../.env.example) lists the variable names. Addresses change by environment. Database passwords in that file are for this machine. Running one business service from Maven needs a reachable Postgres database and, for a real token, Keycloak. `./mvnw test` does not need either of those running.

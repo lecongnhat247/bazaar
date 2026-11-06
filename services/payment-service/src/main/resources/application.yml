@@ -3,6 +3,16 @@ spring:
     name: payment-service
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/payment_db}
+    username: ${DB_USERNAME:payment_user}
+    password: ${DB_PASSWORD:payment_local}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+  flyway:
+    enabled: true
 
 server:
   port: ${SERVER_PORT:8085}
@@ -23,3 +33,10 @@ logging:
   structured:
     format:
       console: ecs
+
+bazaar:
+  security:
+    jwt:
+      remote: true
+      issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8088/realms/bazaar}
+      jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8088/realms/bazaar/protocol/openid-connect/certs}

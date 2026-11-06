@@ -1,0 +1,127 @@
+{
+  "realm": "bazaar",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "CUSTOMER",
+        "description": "Marketplace customer"
+      },
+      {
+        "name": "SELLER",
+        "description": "Marketplace seller"
+      },
+      {
+        "name": "ADMIN",
+        "description": "Marketplace administrator"
+      },
+      {
+        "name": "OPERATOR",
+        "description": "Marketplace operator"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "bazaar-dev",
+      "name": "BAZAAR local development",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "customer",
+      "enabled": true,
+      "email": "customer@localhost",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Customer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "customer_local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "CUSTOMER"
+      ]
+    },
+    {
+      "username": "seller",
+      "enabled": true,
+      "email": "seller@localhost",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Seller",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "seller_local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "SELLER"
+      ]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@localhost",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin_local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ADMIN"
+      ]
+    },
+    {
+      "username": "operator",
+      "enabled": true,
+      "email": "operator@localhost",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Operator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "operator_local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "OPERATOR"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Catalog Service
 
-Spring Boot skeleton for the BAZAAR catalog bounded context. Product management is later work. This process exposes health and a service info endpoint.
+Spring Boot service for the BAZAAR catalog. Product management is a later milestone. This process owns `catalog_db`, validates Keycloak JWTs, and leaves health and `/api/v1/catalog/info` public.
 
 ## Requirements
 
@@ -38,6 +38,11 @@ The process listens on port 8082 unless `SERVER_PORT` is set.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SERVER_PORT` | `8082` | HTTP port |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/catalog_db` | This service's database |
+| `DB_USERNAME` | `catalog_user` | Database user |
+| `DB_PASSWORD` | `catalog_local` | Local database password |
+| `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
+| `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
 
 ## Versions
 

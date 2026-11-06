@@ -18,7 +18,7 @@ Phase 1:
 - Expose Actuator health, including liveness and readiness.
 - Log in a structured console format and shut down gracefully.
 
-The gateway does not authenticate, limit rates, or implement marketplace rules.
+The gateway does not validate tokens, limit rates, or implement marketplace rules. It forwards the `Authorization` header. Each business service checks the JWT.
 
 ## Identity Service
 
@@ -26,11 +26,11 @@ The gateway does not authenticate, limit rates, or implement marketplace rules.
 | --- | --- |
 | Technology | Spring Boot |
 | Port | 8080 in a container, 8081 as a local process |
-| Data | None in Phase 1. PostgreSQL in a later phase. |
+| Data | PostgreSQL `identity_db`. Keycloak issues tokens and keeps its own database. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/identity/info`.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/identity/info`. Both stay public.
 
-Later, this service owns customer registration, login, password hashing, JWT access tokens, refresh tokens, profiles, and the roles `CUSTOMER`, `SELLER`, and `ADMIN`.
+Phase 2 stores a profile for the Keycloak subject and the application roles `CUSTOMER`, `SELLER`, `ADMIN`, and `OPERATOR`. `GET /api/v1/identity/me` requires a bearer token. Login and password storage stay in Keycloak.
 
 ## Catalog Service
 
@@ -38,7 +38,7 @@ Later, this service owns customer registration, login, password hashing, JWT acc
 | --- | --- |
 | Technology | Spring Boot |
 | Port | 8080 in a container, 8082 as a local process |
-| Data | None in Phase 1. MongoDB in a later phase. |
+| Data | PostgreSQL `catalog_db`. JSONB is the planned store for category-specific attributes. See [ADR-006](../adr/ADR-006-catalog-postgresql.md). |
 
 Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`.
 
@@ -50,9 +50,9 @@ Later, this service owns products, categories, image metadata, search, and flexi
 | --- | --- |
 | Technology | Spring Boot |
 | Port | 8080 in a container, 8083 as a local process |
-| Data | None in Phase 1. PostgreSQL in a later phase. |
+| Data | PostgreSQL `inventory_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/inventory/info`.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/inventory/info`. The info path stays public. Other paths require a JWT. Stock tables are a later milestone.
 
 Later, this service owns stock quantities, reservations, reservation expiry, and movement history. Stock changes must be atomic in the database.
 
@@ -62,9 +62,9 @@ Later, this service owns stock quantities, reservations, reservation expiry, and
 | --- | --- |
 | Technology | Spring Boot |
 | Port | 8080 in a container, 8084 as a local process |
-| Data | None in Phase 1. PostgreSQL in a later phase. |
+| Data | PostgreSQL `order_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. The info path stays public. Other paths require a JWT. Order tables are a later milestone.
 
 Later, this service owns order creation, retrieval, cancellation, and explicit state transitions: `PENDING`, `PENDING_PAYMENT`, `CONFIRMED`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`, and `PAYMENT_FAILED`.
 
@@ -74,9 +74,9 @@ Later, this service owns order creation, retrieval, cancellation, and explicit s
 | --- | --- |
 | Technology | Spring Boot |
 | Port | 8080 in a container, 8085 as a local process |
-| Data | None in Phase 1. PostgreSQL in a later phase. |
+| Data | PostgreSQL `payment_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`. The info path stays public. Other paths require a JWT. Payment tables are a later milestone.
 
 Later, this service simulates payment processing and stores payment attempts. An idempotency key must prevent a repeated request from creating a second successful charge. A real payment provider is out of scope until a later decision.
 

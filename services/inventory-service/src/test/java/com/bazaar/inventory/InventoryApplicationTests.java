@@ -5,15 +5,26 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPublicKey;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@SpringBootTest
+@SpringBootTest(properties = "bazaar.security.jwt.remote=false")
 @AutoConfigureMockMvc
+@Import({InventoryApplicationTests.DatabaseTestConfiguration.class, InventoryApplicationTests.TestJwtConfiguration.class})
 class InventoryApplicationTests {
 
     @Autowired
@@ -46,11 +57,39 @@ class InventoryApplicationTests {
     }
 
     @Test
-    void infoReturnsServiceMetadata() throws Exception {
+    void infoStaysPublic() throws Exception {
         mockMvc.perform(get("/api/v1/inventory/info"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.service").value("inventory-service"))
                 .andExpect(jsonPath("$.version").value("0.1.0-SNAPSHOT"))
                 .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void unknownApiRequiresAToken() throws Exception {
+        mockMvc.perform(get("/api/v1/inventory/private"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class DatabaseTestConfiguration {
+
+        @Bean
+        @ServiceConnection
+        PostgreSQLContainer postgresContainer() {
+            return new PostgreSQLContainer("postgres:17.11-alpine");
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestJwtConfiguration {
+
+        @Bean
+        JwtDecoder jwtDecoder() throws Exception {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            RSAPublicKey publicKey = (RSAPublicKey) generator.generateKeyPair().getPublic();
+            return NimbusJwtDecoder.withPublicKey(publicKey).build();
+        }
     }
 }

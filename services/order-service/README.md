@@ -1,6 +1,6 @@
 # Order Service
 
-Spring Boot skeleton for the BAZAAR order bounded context. Checkout and order state changes are later work. This process exposes health and a service info endpoint.
+Spring Boot service for BAZAAR orders. Checkout is a later milestone. This process owns `order_db`, validates Keycloak JWTs, and leaves health and `/api/v1/orders/info` public.
 
 ## Requirements
 
@@ -38,6 +38,11 @@ The process listens on port 8084 unless `SERVER_PORT` is set.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SERVER_PORT` | `8084` | HTTP port |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/order_db` | This service's database |
+| `DB_USERNAME` | `order_user` | Database user |
+| `DB_PASSWORD` | `order_local` | Local database password |
+| `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
+| `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
 
 ## Versions
 
