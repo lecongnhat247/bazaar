@@ -44,6 +44,8 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`. Both stay
 
 Phase 2 stores categories, products, image metadata, and flexible attributes in JSONB. A public product read returns `ACTIVE` products only. A seller creates a product as `DRAFT` and publishes it with a status change. The seller id comes from the token. Stock quantities stay in inventory. There is no product variant in this milestone.
 
+A status change into or out of `ACTIVE`, and an update of an `ACTIVE` product, inserts `bazaar.catalog.events` into the catalog outbox in the same transaction. Creating or editing a draft does not. Readiness does not include Kafka.
+
 ## Inventory Service
 
 | | |
@@ -55,6 +57,8 @@ Phase 2 stores categories, products, image metadata, and flexible attributes in 
 Phase 1 exposes `GET /actuator/health` and `GET /api/v1/inventory/info`. Both stay public.
 
 Phase 2 stores on-hand stock, holds, and movement history in `inventory_db`. A hold decrements available stock with one conditional SQL update, so concurrent checkouts cannot oversell. Holds expire and return stock. Committing a hold keeps the stock sold and clears the reserved count. There is no foreign key to the catalog.
+
+A new hold, a release, a commit, and an expiry each insert one `bazaar.inventory.events` row in that same transaction. Replaying an idempotency key does not insert another row. A rejected hold has no row to publish. Readiness does not include Kafka.
 
 ## Order Service
 
@@ -68,6 +72,8 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. Both stay 
 
 Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYMENT` order, and asks payment to simulate success or failure. Success confirms the order and commits the reservation. Failure marks `PAYMENT_FAILED` and releases the reservation. A customer can cancel only while payment is still pending. The service calls the other three over HTTP and does not read their databases. There is no shipping status in this milestone.
 
+Checkout still returns the order from the same HTTP call. The insert and each later status change also write `bazaar.order.events` to the order outbox in that transaction. The service consumes the topic and applies each `eventId` once. Readiness does not include the broker, so a Kafka outage does not take checkout or product reads down.
+
 ## Payment Service
 
 | | |
@@ -79,6 +85,8 @@ Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYM
 Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`. Both stay public.
 
 Phase 2 stores mock payments and payment attempts. A payment is bound to an order id and an amount. The same idempotency key cannot create a second payment, and an order cannot have two pending or successful payments. Success and failure are simulated. There is no card network and no call to the order service yet.
+
+A real status change to `SUCCEEDED`, `FAILED`, or `CANCELLED` inserts one `bazaar.payment.events` row in that same transaction. Creating a pending payment does not. Readiness does not include Kafka.
 
 ## Storefront
 

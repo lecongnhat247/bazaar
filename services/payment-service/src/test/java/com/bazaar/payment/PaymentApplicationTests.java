@@ -23,23 +23,54 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@SpringBootTest(properties = "bazaar.security.jwt.remote=false")
+import com.bazaar.payment.messaging.ServiceEventConsumer;
+import com.bazaar.payment.outbox.OutboxPublisher;
+
+@SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
 @AutoConfigureMockMvc
 @Import({PaymentApplicationTests.DatabaseTestConfiguration.class, PaymentApplicationTests.TestJwtConfiguration.class})
 class PaymentApplicationTests {
+
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.1");
+
+    static {
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR", "1");
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR", "1");
+        KAFKA.start();
+    }
 
     @Autowired
     private ApplicationContext applicationContext;
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    @Autowired
+    private OutboxPublisher outbox;
+
+    @Autowired
+    private ServiceEventConsumer events;
+
+    @DynamicPropertySource
+    static void kafka(DynamicPropertyRegistry registry) {
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("spring.kafka.listener.auto-startup", () -> "true");
+    }
 
     @Test
     void applicationContextStarts() {
@@ -195,6 +226,80 @@ class PaymentApplicationTests {
                         .content(body(UUID.randomUUID(), "0")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("amount is invalid"));
+    }
+
+    @Test
+    void duplicateDeliveryIsAppliedOnce() {
+        UUID eventId = UUID.randomUUID();
+        String aggregateId = UUID.randomUUID().toString();
+        String body = """
+                {"eventId":"%s","eventType":"payment.succeeded","eventVersion":1,"aggregateId":"%s","aggregateType":"payment","occurredAt":"2026-11-07T00:00:00Z","correlationId":"22222222-2222-4222-8222-222222222222","producer":"payment-service"}
+                """.formatted(eventId, aggregateId);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.payment.events", 0, 0L, aggregateId, body);
+        events.onEvent(record);
+        events.onEvent(record);
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM processed_events WHERE event_id = ?",
+                Integer.class,
+                eventId);
+        assertThat(applied).isEqualTo(1);
+    }
+
+    @Test
+    void successfulPaymentIsPublishedOnce() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        MvcResult created = mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-outbox"))
+                        .header("Idempotency-Key", "pay-outbox-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "12.00")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        assertThat(rows(id)).isZero();
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-outbox")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-outbox")))
+                .andExpect(status().isOk());
+        assertThat(rows(id)).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT event_type FROM outbox WHERE aggregate_id = ?",
+                String.class,
+                id)).isEqualTo("payment.succeeded");
+        outbox.publishPending();
+        waitUntilProcessed(id, 1);
+        jdbc.update("UPDATE outbox SET status = 'PENDING', claimed_at = NULL, published_at = NULL WHERE aggregate_id = ?", id);
+        outbox.publishPending();
+        Thread.sleep(1000);
+        assertThat(processed(id)).isEqualTo(1);
+    }
+
+    private int rows(String aggregateId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ?",
+                Integer.class,
+                aggregateId);
+        return count == null ? 0 : count;
+    }
+
+    private void waitUntilProcessed(String aggregateId, int expected) throws InterruptedException {
+        for (int attempt = 0; attempt < 50; attempt++) {
+            if (processed(aggregateId) == expected) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        assertThat(processed(aggregateId)).isEqualTo(expected);
+    }
+
+    private int processed(String aggregateId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM processed_events
+                WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
+                """, Integer.class, aggregateId);
+        return count == null ? 0 : count;
     }
 
     private static String body(UUID orderId, String amount) {

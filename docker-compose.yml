@@ -124,6 +124,7 @@ services:
       DB_PASSWORD: catalog_local
       KEYCLOAK_ISSUER_URI: http://localhost:8088/realms/bazaar
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,6 +149,7 @@ services:
       DB_PASSWORD: inventory_local
       KEYCLOAK_ISSUER_URI: http://localhost:8088/realms/bazaar
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,6 +177,7 @@ services:
       CATALOG_SERVICE_URL: http://catalog-service:8080
       INVENTORY_SERVICE_URL: http://inventory-service:8080
       PAYMENT_SERVICE_URL: http://payment-service:8080
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       postgres:
         condition: service_healthy
@@ -205,6 +208,7 @@ services:
       DB_PASSWORD: payment_local
       KEYCLOAK_ISSUER_URI: http://localhost:8088/realms/bazaar
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       postgres:
         condition: service_healthy
@@ -234,6 +238,63 @@ services:
     networks:
       - bazaar
 
+  kafka:
+    image: apache/kafka:4.1.1
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT_HOST://:9092,PLAINTEXT://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:9092,PLAINTEXT://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 1
+      KAFKA_LOG_RETENTION_BYTES: 67108864
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 20s
+    mem_limit: 768m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  kafka-init:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -eu
+        for topic in bazaar.order.events bazaar.inventory.events bazaar.payment.events bazaar.catalog.events; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 --config retention.ms=3600000 --config retention.bytes=67108864
+        done
+    mem_limit: 256m
+    restart: "no"
+    networks:
+      - bazaar
+
 networks:
   bazaar:
     name: bazaar
@@ -241,3 +302,5 @@ networks:
 volumes:
   postgres-data:
     name: bazaar-postgres-data
+  kafka-data:
+    name: bazaar-kafka-data

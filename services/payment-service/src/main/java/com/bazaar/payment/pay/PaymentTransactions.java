@@ -12,13 +12,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.payment.outbox.OutboxStore;
+
 @Service
 class PaymentTransactions {
 
     private final JdbcTemplate jdbc;
+    private final OutboxStore outbox;
 
-    PaymentTransactions(JdbcTemplate jdbc) {
+    PaymentTransactions(JdbcTemplate jdbc, OutboxStore outbox) {
         this.jdbc = jdbc;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -83,12 +87,26 @@ class PaymentTransactions {
                 """, status, Timestamp.from(now), id);
         if (changed == 1) {
             attempt(id, attemptType, status, now);
+            outbox.add(eventType(status), "payment", id.toString(), id, java.util.Map.of(
+                    "orderId", current.orderId().toString(),
+                    "amount", current.amount().toPlainString(),
+                    "currency", current.currency(),
+                    "status", status), now);
         }
         PaymentRow latest = required(id);
         if (!status.equals(latest.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This payment can no longer change.");
         }
         return load(id);
+    }
+
+    private static String eventType(String status) {
+        return switch (status) {
+            case "SUCCEEDED" -> "payment.succeeded";
+            case "FAILED" -> "payment.failed";
+            case "CANCELLED" -> "payment.cancelled";
+            default -> "payment." + status.toLowerCase(java.util.Locale.ROOT);
+        };
     }
 
     private PaymentRow required(UUID id) {

@@ -32,6 +32,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -39,12 +41,25 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.server.ResponseStatusException;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@SpringBootTest(properties = "bazaar.security.jwt.remote=false")
+import com.bazaar.inventory.messaging.ServiceEventConsumer;
+import com.bazaar.inventory.outbox.OutboxPublisher;
+
+@SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
 @AutoConfigureMockMvc
 @Import({InventoryApplicationTests.DatabaseTestConfiguration.class, InventoryApplicationTests.TestJwtConfiguration.class})
 class InventoryApplicationTests {
+
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.1");
+
+    static {
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR", "1");
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR", "1");
+        KAFKA.start();
+    }
 
     @Autowired
     private ApplicationContext applicationContext;
@@ -57,6 +72,18 @@ class InventoryApplicationTests {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private OutboxPublisher outbox;
+
+    @Autowired
+    private ServiceEventConsumer events;
+
+    @DynamicPropertySource
+    static void kafka(DynamicPropertyRegistry registry) {
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("spring.kafka.listener.auto-startup", () -> "true");
+    }
 
     @Test
     void applicationContextStarts() {
@@ -295,6 +322,85 @@ class InventoryApplicationTests {
         assertThat(rejected.get()).isEqualTo(3);
         assertThat(stock.available()).isZero();
         assertThat(stock.reserved()).isEqualTo(5);
+    }
+
+    @Test
+    void duplicateDeliveryIsAppliedOnce() {
+        UUID eventId = UUID.randomUUID();
+        String aggregateId = UUID.randomUUID().toString();
+        String body = """
+                {"eventId":"%s","eventType":"inventory.reserved","eventVersion":1,"aggregateId":"%s","aggregateType":"reservation","occurredAt":"2026-11-07T00:00:00Z","correlationId":"22222222-2222-4222-8222-222222222222","producer":"inventory-service"}
+                """.formatted(eventId, aggregateId);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.inventory.events", 0, 0L, aggregateId, body);
+        events.onEvent(record);
+        events.onEvent(record);
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM processed_events WHERE event_id = ?",
+                Integer.class,
+                eventId);
+        assertThat(applied).isEqualTo(1);
+    }
+
+    @Test
+    void reservationIsPublishedOnceWhenTheOutboxRowIsRetried() throws Exception {
+        UUID productId = UUID.randomUUID();
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
+        mockMvc.perform(put("/api/v1/inventory/products/" + productId)
+                        .with(seller("seller-outbox"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"onHand\":4}"))
+                .andExpect(status().isOk());
+        Integer afterStock = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
+        assertThat(afterStock).isEqualTo(before);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/inventory/reservations")
+                        .with(customer("customer-outbox"))
+                        .header("Idempotency-Key", "reserve-outbox-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":\"" + productId + "\",\"quantity\":1}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        mockMvc.perform(post("/api/v1/inventory/reservations")
+                        .with(customer("customer-outbox"))
+                        .header("Idempotency-Key", "reserve-outbox-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":\"" + productId + "\",\"quantity\":1}"))
+                .andExpect(status().isOk());
+        assertThat(pending(id)).isEqualTo(1);
+        outbox.publishPending();
+        waitUntilProcessed(id, 1);
+        jdbc.update("UPDATE outbox SET status = 'PENDING', claimed_at = NULL, published_at = NULL WHERE aggregate_id = ?", id);
+        outbox.publishPending();
+        Thread.sleep(1000);
+        assertThat(processed(id)).isEqualTo(1);
+    }
+
+    private int pending(String aggregateId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ? AND status = 'PENDING'",
+                Integer.class,
+                aggregateId);
+        return count == null ? 0 : count;
+    }
+
+    private void waitUntilProcessed(String aggregateId, int expected) throws InterruptedException {
+        for (int attempt = 0; attempt < 50; attempt++) {
+            if (processed(aggregateId) == expected) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        assertThat(processed(aggregateId)).isEqualTo(expected);
+    }
+
+    private int processed(String aggregateId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM processed_events
+                WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
+                """, Integer.class, aggregateId);
+        return count == null ? 0 : count;
     }
 
     private static RequestPostProcessor customer(String subject) {

@@ -4,6 +4,8 @@ Stores mock payments and the attempts made against them. It does not call a bank
 
 A repeated request with the same `Idempotency-Key` returns the original payment. An order can have only one `PENDING` or `SUCCEEDED` payment. A `FAILED` or `CANCELLED` payment leaves the order free for another attempt.
 
+A change to `SUCCEEDED`, `FAILED`, or `CANCELLED` writes `payment.succeeded`, `payment.failed`, or `payment.cancelled` in the same transaction. Repeating that call does not write a second row. The poller publishes `bazaar.payment.events`, and `processed_events` keeps one row per `eventId`. Readiness does not include Kafka.
+
 ## Requirements
 
 - JDK 25 on `JAVA_HOME`

@@ -2,7 +2,7 @@
 
 kind runs the Phase 1 Helm chart on one local node. The chart is the Kubernetes deployment. Compose is not converted into manifests. A remote cluster uses the same chart with different values.
 
-Phase 2 services need PostgreSQL and Keycloak before they can pass readiness. This chart does not deploy either one, and it does not invent a database URL. `helm install` from this milestone will not become ready until those stores exist in the cluster. Verify Phase 2 on Compose.
+Phase 2 services need PostgreSQL and Keycloak before they can pass readiness. This chart does not deploy either one, and it does not invent a database URL. It also does not deploy Kafka. `helm install` from this milestone will not become ready until those stores exist in the cluster. Verify Phase 2 and the Kafka broker on Compose.
 
 Run these commands in WSL Ubuntu. kind 0.33.0, Helm 4.3.1, and kubectl 1.37.2 are installed there. Windows kubectl from Docker Desktop is 1.36.1 and does not match this cluster.
 

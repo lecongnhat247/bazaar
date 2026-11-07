@@ -13,6 +13,23 @@ spring:
       ddl-auto: none
   flyway:
     enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    client-id: catalog-service
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    consumer:
+      group-id: catalog-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      auto-startup: false
+      missing-topics-fatal: false
+    admin:
+      fail-fast: false
 
 server:
   port: ${SERVER_PORT:8082}
@@ -28,6 +45,11 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,db,diskSpace,ping
+        kafka:
+          include: kafkaBroker
 
 logging:
   structured:
@@ -35,8 +57,14 @@ logging:
       console: ecs
 
 bazaar:
+  catalog:
+    events-topic: ${CATALOG_EVENTS_TOPIC:bazaar.catalog.events}
   security:
     jwt:
       remote: true
       issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8088/realms/bazaar}
       jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8088/realms/bazaar/protocol/openid-connect/certs}
+  outbox:
+    poll-delay: ${OUTBOX_POLL_DELAY:1000}
+    batch-size: ${OUTBOX_BATCH_SIZE:20}
+    stale: ${OUTBOX_STALE:30s}

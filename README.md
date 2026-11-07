@@ -1,6 +1,6 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Kafka, a real payment provider, and the kind database are still later work.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Phase 3 records those business facts in a service-local outbox and publishes them to a local Kafka broker. Saga, Redis, and a real payment provider are still later work.
 
 ## Phase 1
 
@@ -27,6 +27,19 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M6 | Storefront | Complete |
 | M7 | Integration | Complete |
 
+## Phase 3
+
+| Milestone | Scope | Status |
+| --- | --- | --- |
+| M0 | Phase 2 audit | Complete |
+| M1 | Kafka foundation | Complete |
+| M2 | Transactional outbox and idempotent consumers | Complete |
+| M3 | Saga orchestration | Not started |
+| M4 | Redis | Not started |
+| M5 | Notifications and WebSocket | Not started |
+| M6 | Reliability and testing | Not started |
+| M7 | Integration | Not started |
+
 ## Documentation
 
 - [Architecture overview](docs/architecture/overview.md)
@@ -47,6 +60,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [ADR-004 Docker and Kubernetes](docs/adr/ADR-004-docker-and-kubernetes.md)
 - [ADR-005 Database ownership](docs/adr/ADR-005-database-ownership.md)
 - [ADR-006 Catalog on PostgreSQL](docs/adr/ADR-006-catalog-postgresql.md)
+- [ADR-007 Kafka in KRaft](docs/adr/ADR-007-kafka-kraft.md)
 
 ## Planned applications
 
@@ -84,6 +98,7 @@ Backend versions are pinned in the parent POM and the Maven Wrapper. The Next.js
 | kind / Kubernetes | 0.33.0 / 1.37.0 |
 | Helm | 4.3.1 |
 | kubectl for the cluster | 1.37.2 inside WSL Ubuntu |
+| Kafka | Broker image `apache/kafka:4.1.1` in KRaft. Spring Kafka 4.1.2 and Kafka clients 4.2.2 come from Spring Boot 4.1.2 |
 
 ## Repository layout
 

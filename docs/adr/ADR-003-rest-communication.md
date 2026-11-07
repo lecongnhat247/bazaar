@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Superseded in part: Phase 3 adds a KRaft broker beside REST. Checkout stays synchronous until the Saga milestone. See [ADR-007](ADR-007-kafka-kraft.md).
 
 ## Context
 

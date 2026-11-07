@@ -4,6 +4,8 @@ Owns on-hand stock, reservations, and stock movements for a product id. It does 
 
 Available stock changes in one conditional SQL update: `available >= quantity`. PostgreSQL locks that row for the update, so two reservations cannot both take the last unit. The service does not read the row and then write it back.
 
+A new hold writes `inventory.reserved`. Release, commit, and expiry write `inventory.released`, `inventory.committed`, and `inventory.expired` only when the reservation row changes. The outbox insert shares that transaction. The poller publishes `bazaar.inventory.events`. A duplicate `eventId` is stored once in `processed_events`. Changing on-hand stock does not publish an event. Readiness does not include Kafka.
+
 ## Requirements
 
 - JDK 25 on `JAVA_HOME`

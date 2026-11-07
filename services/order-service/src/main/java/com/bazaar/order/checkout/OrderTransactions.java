@@ -13,13 +13,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.order.outbox.OutboxStore;
+
 @Service
 class OrderTransactions {
 
     private final JdbcTemplate jdbc;
+    private final OutboxStore outbox;
 
-    OrderTransactions(JdbcTemplate jdbc) {
+    OrderTransactions(JdbcTemplate jdbc, OutboxStore outbox) {
         this.jdbc = jdbc;
+        this.outbox = outbox;
     }
 
     @Transactional(readOnly = true)
@@ -59,6 +63,7 @@ class OrderTransactions {
                     line.unitPrice(), line.quantity(), line.lineTotal(), line.reservationId());
         }
         history(id, "PENDING_PAYMENT", 1, now);
+        outbox.add("order.pending-payment", "order", id.toString(), id, money(currency, total, "PENDING_PAYMENT"), now);
         return required(id);
     }
 
@@ -85,6 +90,7 @@ class OrderTransactions {
                     Integer.class,
                     orderId);
             history(orderId, status, seq == null ? 1 : seq, now);
+            outbox.add(eventType(status), "order", orderId.toString(), orderId, money(latestCurrency(orderId), latestTotal(orderId), status), now);
         }
         OrderRow latest = required(orderId);
         if (!status.equals(latest.status())) {
@@ -206,6 +212,27 @@ class OrderTransactions {
                         rs.getBigDecimal("line_total"),
                         rs.getObject("reservation_id", UUID.class)),
                 orderId);
+    }
+
+    private static String eventType(String status) {
+        return switch (status) {
+            case "CONFIRMED" -> "order.confirmed";
+            case "PAYMENT_FAILED" -> "order.payment-failed";
+            case "CANCELLED" -> "order.cancelled";
+            default -> "order." + status.toLowerCase(java.util.Locale.ROOT);
+        };
+    }
+
+    private java.util.Map<String, String> money(String currency, BigDecimal total, String status) {
+        return java.util.Map.of("status", status, "currency", currency, "total", total.toPlainString());
+    }
+
+    private String latestCurrency(UUID orderId) {
+        return jdbc.queryForObject("SELECT currency FROM customer_order WHERE id = ?", String.class, orderId).trim();
+    }
+
+    private BigDecimal latestTotal(UUID orderId) {
+        return jdbc.queryForObject("SELECT total_amount FROM customer_order WHERE id = ?", BigDecimal.class, orderId);
     }
 
     private void history(UUID orderId, String status, int seq, Instant now) {

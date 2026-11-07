@@ -1,6 +1,7 @@
 package com.bazaar.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,14 +13,18 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -35,12 +40,16 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.bazaar.order.messaging.OrderEventConsumer;
+import com.bazaar.order.outbox.OutboxPublisher;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-@SpringBootTest(properties = "bazaar.security.jwt.remote=false")
+@SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
 @AutoConfigureMockMvc
 @Import({OrderApplicationTests.DatabaseTestConfiguration.class, OrderApplicationTests.TestJwtConfiguration.class})
 class OrderApplicationTests {
@@ -52,6 +61,13 @@ class OrderApplicationTests {
     private static final AtomicInteger RELEASES = new AtomicInteger();
     private static volatile String fault = "NONE";
     private static final HttpServer DOWNSTREAM = startDownstream();
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.1");
+
+    static {
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR", "1");
+        KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR", "1");
+        KAFKA.start();
+    }
 
     @Autowired
     private ApplicationContext applicationContext;
@@ -59,12 +75,23 @@ class OrderApplicationTests {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private OrderEventConsumer orderEvents;
+
+    @Autowired
+    private OutboxPublisher outbox;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @DynamicPropertySource
     static void downstream(DynamicPropertyRegistry registry) {
         String base = "http://127.0.0.1:" + DOWNSTREAM.getAddress().getPort();
         registry.add("bazaar.order.catalog-url", () -> base);
         registry.add("bazaar.order.inventory-url", () -> base);
         registry.add("bazaar.order.payment-url", () -> base);
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("spring.kafka.listener.auto-startup", () -> "true");
     }
 
     @BeforeEach
@@ -78,6 +105,97 @@ class OrderApplicationTests {
     @Test
     void applicationContextStarts() {
         assertThat(applicationContext).isNotNull();
+    }
+
+    @Test
+    void kafkaHealthIsSeparateFromReadiness() throws Exception {
+        mockMvc.perform(get("/actuator/health/kafka"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void duplicateDeliveryIsAppliedOnce() {
+        UUID eventId = UUID.randomUUID();
+        String aggregateId = UUID.randomUUID().toString();
+        String body = """
+                {"eventId":"%s","eventType":"order.foundation-checked","eventVersion":1,"aggregateId":"%s","aggregateType":"order","occurredAt":"2026-11-07T00:00:00Z","correlationId":"22222222-2222-4222-8222-222222222222","producer":"order-service"}
+                """.formatted(eventId, aggregateId);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.order.events", 0, 0L, aggregateId, body);
+        orderEvents.onOrderEvent(record);
+        orderEvents.onOrderEvent(record);
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM processed_events WHERE event_id = ?",
+                Integer.class,
+                eventId);
+        assertThat(applied).isEqualTo(1);
+    }
+
+    @Test
+    void confirmedOrderIsPublishedOnceWhenTheOutboxRowIsRetried() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-outbox"))
+                        .header("Idempotency-Key", "order-key-outbox")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        Integer pending = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ? AND status = 'PENDING'",
+                Integer.class,
+                id);
+        assertThat(pending).isEqualTo(2);
+        outbox.publishPending();
+        waitUntilProcessed(id, 2);
+        jdbc.update("UPDATE outbox SET status = 'PENDING', claimed_at = NULL, published_at = NULL WHERE aggregate_id = ?", id);
+        outbox.publishPending();
+        Thread.sleep(1000);
+        assertThat(processed(id)).isEqualTo(2);
+    }
+
+    @Test
+    void rejectedCheckoutWritesNoOutboxRow() throws Exception {
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
+        fault = "STOCK";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-outbox-stock"))
+                        .header("Idempotency-Key", "order-key-outbox-stock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(SHIRT, 1, "SUCCESS")))
+                .andExpect(status().isConflict());
+        Integer after = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
+        assertThat(after).isEqualTo(before);
+    }
+
+    private void waitUntilProcessed(String orderId, int expected) throws InterruptedException {
+        for (int attempt = 0; attempt < 50; attempt++) {
+            if (processed(orderId) == expected) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        assertThat(processed(orderId)).isEqualTo(expected);
+    }
+
+    private int processed(String orderId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM processed_events
+                WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
+                """, Integer.class, orderId);
+        return count == null ? 0 : count;
+    }
+
+    @Test
+    void consumerRejectsAKeyThatIsNotTheAggregate() {
+        String body = """
+                {"eventId":"11111111-1111-4111-8111-111111111111","eventType":"order.foundation-checked","eventVersion":1,"aggregateId":"order-1","aggregateType":"order","occurredAt":"2026-11-07T00:00:00Z","correlationId":"22222222-2222-4222-8222-222222222222","producer":"order-service"}
+                """;
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.order.events", 0, 0L, "other-key", body);
+        assertThatThrownBy(() -> orderEvents.onOrderEvent(record))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

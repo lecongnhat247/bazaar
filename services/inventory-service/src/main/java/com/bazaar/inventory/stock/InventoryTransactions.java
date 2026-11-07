@@ -11,13 +11,17 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.inventory.outbox.OutboxStore;
+
 @Service
 class InventoryTransactions {
 
     private final JdbcTemplate jdbc;
+    private final OutboxStore outbox;
 
-    InventoryTransactions(JdbcTemplate jdbc) {
+    InventoryTransactions(JdbcTemplate jdbc, OutboxStore outbox) {
         this.jdbc = jdbc;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -88,6 +92,7 @@ class InventoryTransactions {
             if (changed == 1) {
                 returnStock(held.productId(), held.quantity(), now);
                 movement(held.productId(), held.id(), "EXPIRE", held.quantity(), now);
+                reservationEvent("inventory.expired", held.id(), held.productId(), held.quantity(), "EXPIRED", now);
                 expired++;
             }
         }
@@ -124,6 +129,7 @@ class InventoryTransactions {
                 """, id, productId, quantity, key, hash, access.subject(),
                 Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now));
         movement(productId, id, "RESERVE", quantity, now);
+        reservationEvent("inventory.reserved", id, productId, quantity, "HELD", now);
         return new ReserveOutcome(findReservation(id), true);
     }
 
@@ -153,6 +159,7 @@ class InventoryTransactions {
         if (changed == 1) {
             returnStock(current.productId(), current.quantity(), now);
             movement(current.productId(), id, "RELEASE", current.quantity(), now);
+            reservationEvent("inventory.released", id, current.productId(), current.quantity(), "RELEASED", now);
             return findReservation(id).withoutSecrets();
         }
         ReservationResponse latest = findReservation(id);
@@ -186,6 +193,7 @@ class InventoryTransactions {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Reserved stock could not be committed.");
             }
             movement(current.productId(), id, "COMMIT", current.quantity(), now);
+            reservationEvent("inventory.committed", id, current.productId(), current.quantity(), "COMMITTED", now);
         }
         ReservationResponse latest = findReservation(id);
         if (!"COMMITTED".equals(latest.status())) {
@@ -255,6 +263,13 @@ class InventoryTransactions {
                 rs.getString("request_hash"),
                 rs.getTimestamp("expires_at").toInstant(),
                 rs.getTimestamp("created_at").toInstant());
+    }
+
+    private void reservationEvent(String eventType, UUID reservationId, UUID productId, int quantity, String status, Instant now) {
+        outbox.add(eventType, "inventory", reservationId.toString(), reservationId, java.util.Map.of(
+                "productId", productId.toString(),
+                "quantity", quantity,
+                "status", status), now);
     }
 
     private void movement(UUID productId, UUID reservationId, String type, int quantity, Instant now) {

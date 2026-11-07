@@ -28,6 +28,7 @@ import com.bazaar.catalog.api.ProductResponse;
 import com.bazaar.catalog.api.ProductSearch;
 import com.bazaar.catalog.category.Category;
 import com.bazaar.catalog.category.CategoryRepository;
+import com.bazaar.catalog.outbox.OutboxStore;
 import com.bazaar.catalog.security.CatalogAccess;
 
 import jakarta.persistence.criteria.Predicate;
@@ -43,10 +44,12 @@ public class ProductService {
 
     private final ProductRepository products;
     private final CategoryRepository categories;
+    private final OutboxStore outbox;
 
-    public ProductService(ProductRepository products, CategoryRepository categories) {
+    public ProductService(ProductRepository products, CategoryRepository categories, OutboxStore outbox) {
         this.products = products;
         this.categories = categories;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -82,17 +85,27 @@ public class ProductService {
         product.setAttributes(attributes(request.attributes()));
         product.replaceImages(images(request.images()));
         product.setUpdatedAt(Instant.now());
-        return ProductResponse.from(products.saveAndFlush(product));
+        Product saved = products.saveAndFlush(product);
+        if (saved.getStatus() == ProductStatus.ACTIVE) {
+            catalogEvent("catalog.product-updated", saved);
+        }
+        return ProductResponse.from(saved);
     }
 
     @Transactional
     public ProductResponse changeStatus(Jwt jwt, UUID id, ProductStatus status) {
         Product product = editable(jwt, id);
-        if (!product.getStatus().canTransitionTo(status)) {
+        ProductStatus previous = product.getStatus();
+        if (!previous.canTransitionTo(status)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "That status change is not allowed.");
         }
         product.setStatus(status);
         product.setUpdatedAt(Instant.now());
+        if (previous != status && status == ProductStatus.ACTIVE) {
+            catalogEvent("catalog.product-published", product);
+        } else if (previous == ProductStatus.ACTIVE && status != ProductStatus.ACTIVE) {
+            catalogEvent("catalog.product-unpublished", product);
+        }
         return ProductResponse.from(product);
     }
 
@@ -177,6 +190,15 @@ public class ProductService {
 
     private static boolean canSeeNonActive(CatalogAccess access, ProductSearch search) {
         return access.admin() || (search.mine() && access.seller());
+    }
+
+    private void catalogEvent(String eventType, Product product) {
+        outbox.add(eventType, "catalog", product.getId().toString(), product.getId(), Map.of(
+                "name", product.getName(),
+                "sku", product.getSku(),
+                "price", product.getPrice().toPlainString(),
+                "currency", product.getCurrency(),
+                "status", product.getStatus().name()), product.getUpdatedAt());
     }
 
     private Product editable(Jwt jwt, UUID id) {
