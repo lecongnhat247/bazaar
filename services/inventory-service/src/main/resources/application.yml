@@ -35,6 +35,8 @@ logging:
       console: ecs
 
 bazaar:
+  inventory:
+    reservation-ttl: ${INVENTORY_RESERVATION_TTL:PT15M}
   security:
     jwt:
       remote: true

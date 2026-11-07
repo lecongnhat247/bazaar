@@ -22,9 +22,6 @@ public class CategoryService {
 
     @Transactional(readOnly = true)
     public PageResponse<CategoryResponse> list(Jwt jwt, int page, int size) {
-        if (jwt.getSubject() == null || jwt.getSubject().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "A token is required.");
-        }
         if (page < 0 || size < 1 || size > 50) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page is invalid");
         }

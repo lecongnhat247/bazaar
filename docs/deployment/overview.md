@@ -1,6 +1,6 @@
 # Deployment overview
 
-Phase 1 has three deployment targets. They share images and environment variable names. They do not share a single deployment file.
+Phase 1 has three deployment targets. They share images and environment variable names. They do not share a single deployment file. The Phase 2 purchase path is verified with Docker Compose. kind stays without Postgres and Keycloak.
 
 | Target | When it appears | Purpose |
 | --- | --- | --- |

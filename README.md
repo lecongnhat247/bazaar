@@ -1,6 +1,6 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 adds the purchase journey one milestone at a time. Inventory, checkout, and payment behavior are still later milestones.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Kafka, a real payment provider, and the kind database are still later work.
 
 ## Phase 1
 
@@ -21,11 +21,11 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M0 | Existing project audit | Complete |
 | M1 | Database and security foundation | Complete |
 | M2 | Catalog | Complete |
-| M3 | Inventory | Not started |
-| M4 | Payment | Not started |
-| M5 | Order | Not started |
-| M6 | Storefront | Not started |
-| M7 | Integration | Not started |
+| M3 | Inventory | Complete |
+| M4 | Payment | Complete |
+| M5 | Order | Complete |
+| M6 | Storefront | Complete |
+| M7 | Integration | Complete |
 
 ## Documentation
 

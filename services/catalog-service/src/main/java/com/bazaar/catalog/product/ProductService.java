@@ -101,7 +101,7 @@ public class ProductService {
         CatalogAccess access = CatalogAccess.from(jwt);
         Product product = products.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found."));
-        boolean owner = product.getSellerId().equals(access.subject());
+        boolean owner = !access.subject().isEmpty() && product.getSellerId().equals(access.subject());
         if (product.getStatus() != ProductStatus.ACTIVE && !access.admin() && !owner) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found.");
         }

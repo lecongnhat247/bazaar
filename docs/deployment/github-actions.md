@@ -4,7 +4,7 @@ Two workflows live in `.github/workflows/`. They use `GITHUB_TOKEN`. No registry
 
 | Workflow | When it runs | What it does |
 | --- | --- | --- |
-| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront lint and production build, Helm lint. Pull requests also build the seven images and do not push them. |
+| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront unit tests, lint, and production build, Helm lint. Pull requests also build the seven images and do not push them. |
 | `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the seven images and pushes them to GHCR. |
 
 A GitHub Release that creates a `v*` tag publishes images through the tag push. The publish workflow has no `pull_request` trigger and no `pull_request_target` trigger. A pull request from a fork cannot push images. The publish job also exits if it is ever invoked for a fork pull request.

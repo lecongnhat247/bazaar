@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test src/lib/pkce.test.ts src/lib/return-path.test.ts src/lib/cart.test.ts"
   },
   "dependencies": {
     "next": "16.4.5",

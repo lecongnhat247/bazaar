@@ -17,12 +17,16 @@
   <properties>
     <spring-boot.run.skip>false</spring-boot.run.skip>
   </properties>
-  <description>Spring Boot skeleton for the BAZAAR payment bounded context. Payment simulation is later work.</description>
+  <description>Mock payments and payment attempts. No real payment provider.</description>
 
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

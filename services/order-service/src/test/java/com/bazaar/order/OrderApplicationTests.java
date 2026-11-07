@@ -1,13 +1,23 @@
 package com.bazaar.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPublicKey;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,21 +27,53 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 
 @SpringBootTest(properties = "bazaar.security.jwt.remote=false")
 @AutoConfigureMockMvc
 @Import({OrderApplicationTests.DatabaseTestConfiguration.class, OrderApplicationTests.TestJwtConfiguration.class})
 class OrderApplicationTests {
 
+    private static final UUID LAMP = UUID.fromString("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1001");
+    private static final UUID SHIRT = UUID.fromString("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1002");
+    private static final AtomicInteger RESERVES = new AtomicInteger();
+    private static final AtomicInteger COMMITS = new AtomicInteger();
+    private static final AtomicInteger RELEASES = new AtomicInteger();
+    private static volatile String fault = "NONE";
+    private static final HttpServer DOWNSTREAM = startDownstream();
+
     @Autowired
     private ApplicationContext applicationContext;
 
     @Autowired
     private MockMvc mockMvc;
+
+    @DynamicPropertySource
+    static void downstream(DynamicPropertyRegistry registry) {
+        String base = "http://127.0.0.1:" + DOWNSTREAM.getAddress().getPort();
+        registry.add("bazaar.order.catalog-url", () -> base);
+        registry.add("bazaar.order.inventory-url", () -> base);
+        registry.add("bazaar.order.payment-url", () -> base);
+    }
+
+    @BeforeEach
+    void resetDownstream() {
+        fault = "NONE";
+        RESERVES.set(0);
+        COMMITS.set(0);
+        RELEASES.set(0);
+    }
 
     @Test
     void applicationContextStarts() {
@@ -69,6 +111,255 @@ class OrderApplicationTests {
     void unknownApiRequiresAToken() throws Exception {
         mockMvc.perform(get("/api/v1/orders/private"))
                 .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/v1/orders/checkout").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void checkoutUsesCatalogPriceAndCanBeReplayed() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-ok"))
+                        .header("Idempotency-Key", "order-key-ok")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 2, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.currency").value("USD"))
+                .andExpect(jsonPath("$.total").value(50.00))
+                .andExpect(jsonPath("$.items[0].unitPrice").value(25.00))
+                .andExpect(jsonPath("$.items[0].name").value("Desk lamp"))
+                .andExpect(jsonPath("$.history[0].status").value("PENDING_PAYMENT"))
+                .andExpect(jsonPath("$.history[1].status").value("CONFIRMED"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-ok"))
+                        .header("Idempotency-Key", "order-key-ok")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 2, "SUCCESS")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-ok"))
+                        .header("Idempotency-Key", "order-key-ok")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-ok")))
+                .andExpect(status().isConflict());
+
+        assertThat(RESERVES.get()).isEqualTo(1);
+        assertThat(COMMITS.get()).isEqualTo(1);
+        assertThat(RELEASES.get()).isZero();
+    }
+
+    @Test
+    void failedPaymentReleasesStock() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-fail"))
+                        .header("Idempotency-Key", "order-key-fail")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "FAILURE")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PAYMENT_FAILED"))
+                .andExpect(jsonPath("$.total").value(25.00));
+
+        assertThat(RESERVES.get()).isEqualTo(1);
+        assertThat(COMMITS.get()).isZero();
+        assertThat(RELEASES.get()).isEqualTo(1);
+    }
+
+    @Test
+    void insufficientStockDoesNotCreateAnOrder() throws Exception {
+        fault = "STOCK";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-stock"))
+                        .header("Idempotency-Key", "order-key-stock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":\"" + LAMP + "\",\"quantity\":1},{\"productId\":\"" + SHIRT
+                                + "\",\"quantity\":1}],\"outcome\":\"SUCCESS\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("Not enough stock is available. Use a new Idempotency-Key to try again."));
+
+        mockMvc.perform(get("/api/v1/orders").with(customer("buyer-stock")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        assertThat(RELEASES.get()).isEqualTo(1);
+    }
+
+    @Test
+    void catalogOutageCanBeRetried() throws Exception {
+        fault = "CATALOG";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-retry"))
+                        .header("Idempotency-Key", "order-key-retry")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isServiceUnavailable());
+        assertThat(RESERVES.get()).isZero();
+
+        fault = "NONE";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-retry"))
+                        .header("Idempotency-Key", "order-key-retry")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+    }
+
+    @Test
+    void paymentOutageLeavesAnOrderThatCanBeCancelled() throws Exception {
+        fault = "PAYMENT";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-hold"))
+                        .header("Idempotency-Key", "order-key-hold")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isServiceUnavailable());
+        assertThat(RELEASES.get()).isZero();
+
+        MvcResult listed = mockMvc.perform(get("/api/v1/orders").with(customer("buyer-hold")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("PENDING_PAYMENT"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(listed.getResponse().getContentAsString(), "$[0].id");
+
+        mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-hold")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        assertThat(RELEASES.get()).isEqualTo(1);
+    }
+
+    @Test
+    void anotherCustomerCannotReadTheOrder() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-owner"))
+                        .header("Idempotency-Key", "order-key-owner")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-other")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/" + id).with(admin("buyer-admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
+    void invalidCheckoutIsRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-bad"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Idempotency-Key is invalid"));
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-bad"))
+                        .header("Idempotency-Key", "order-key-bad")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":\"" + LAMP + "\",\"quantity\":1},{\"productId\":\"" + LAMP
+                                + "\",\"quantity\":1}],\"outcome\":\"SUCCESS\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private static String body(UUID productId, int quantity, String outcome) {
+        return "{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
+                + ",\"price\":1}],\"outcome\":\"" + outcome + "\"}";
+    }
+
+    private static RequestPostProcessor customer(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("CUSTOMER"))));
+    }
+
+    private static RequestPostProcessor admin(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("ADMIN"))));
+    }
+
+    private static HttpServer startDownstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/", OrderApplicationTests::handle);
+            server.start();
+            return server;
+        } catch (IOException exception) {
+            throw new IllegalStateException("The checkout stub could not start.", exception);
+        }
+    }
+
+    private static void handle(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
+        String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        if ("GET".equals(method) && path.startsWith("/api/v1/products/")) {
+            if ("CATALOG".equals(fault)) {
+                send(exchange, 500, "{\"error\":\"down\"}");
+                return;
+            }
+            UUID id = UUID.fromString(path.substring(path.lastIndexOf('/') + 1));
+            String name = SHIRT.equals(id) ? "Shirt" : "Desk lamp";
+            String sku = SHIRT.equals(id) ? "SHIRT" : "LAMP";
+            String price = SHIRT.equals(id) ? "19.50" : "25.00";
+            send(exchange, 200, "{\"id\":\"" + id + "\",\"sellerId\":\"seller-1\",\"name\":\"" + name
+                    + "\",\"sku\":\"" + sku + "\",\"price\":" + price + ",\"currency\":\"USD\",\"status\":\"ACTIVE\"}");
+            return;
+        }
+        if ("POST".equals(method) && "/api/v1/inventory/reservations".equals(path)) {
+            RESERVES.incrementAndGet();
+            if ("STOCK".equals(fault) && request.contains(SHIRT.toString())) {
+                send(exchange, 409, "{\"error\":\"Not enough stock is available.\"}");
+                return;
+            }
+            send(exchange, 201, "{\"id\":\"" + UUID.randomUUID() + "\",\"status\":\"HELD\"}");
+            return;
+        }
+        if ("POST".equals(method) && path.endsWith("/commit")) {
+            COMMITS.incrementAndGet();
+            send(exchange, 200, "{\"status\":\"COMMITTED\"}");
+            return;
+        }
+        if ("POST".equals(method) && path.endsWith("/release")) {
+            RELEASES.incrementAndGet();
+            send(exchange, 200, "{\"status\":\"RELEASED\"}");
+            return;
+        }
+        if ("POST".equals(method) && "/api/v1/payments".equals(path)) {
+            if ("PAYMENT".equals(fault)) {
+                send(exchange, 503, "{\"error\":\"down\"}");
+                return;
+            }
+            send(exchange, 201, "{\"id\":\"" + UUID.randomUUID() + "\",\"status\":\"PENDING\"}");
+            return;
+        }
+        if ("POST".equals(method) && path.endsWith("/simulate-success")) {
+            send(exchange, 200, "{\"id\":\"" + UUID.randomUUID() + "\",\"status\":\"SUCCEEDED\"}");
+            return;
+        }
+        if ("POST".equals(method) && path.endsWith("/simulate-failure")) {
+            send(exchange, 200, "{\"id\":\"" + UUID.randomUUID() + "\",\"status\":\"FAILED\"}");
+            return;
+        }
+        if ("POST".equals(method) && path.endsWith("/cancel")) {
+            send(exchange, 200, "{\"id\":\"" + UUID.randomUUID() + "\",\"status\":\"CANCELLED\"}");
+            return;
+        }
+        send(exchange, 404, "{\"error\":\"missing\"}");
+    }
+
+    private static void send(HttpExchange exchange, int code, String json) throws IOException {
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(code, body.length);
+        exchange.getResponseBody().write(body);
+        exchange.close();
     }
 
     @TestConfiguration(proxyBeanMethods = false)

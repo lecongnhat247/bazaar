@@ -18,6 +18,9 @@ public record CatalogAccess(String subject, Set<String> roles) {
     }
 
     public static CatalogAccess from(Jwt jwt) {
+        if (jwt == null || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
+            return new CatalogAccess("", Set.of());
+        }
         return new CatalogAccess(jwt.getSubject(), rolesFrom(jwt));
     }
 

@@ -1,11 +1,14 @@
 # Order Service
 
-Spring Boot service for BAZAAR orders. Checkout is a later milestone. This process owns `order_db`, validates Keycloak JWTs, and leaves health and `/api/v1/orders/info` public.
+Runs checkout. The price comes from the catalog. The client cannot set it. Stock is reserved in the inventory service, then a mock payment is created in the payment service. Nothing here talks to a bank or reads another service's database.
+
+`outcome` is `SUCCESS` or `FAILURE`. That chooses the mock payment result. A repeated checkout with the same `Idempotency-Key` and the same items returns the original order.
 
 ## Requirements
 
 - JDK 25 on `JAVA_HOME`
 - Maven Wrapper at the repository root
+- PostgreSQL for a local run. `./mvnw test` starts its own database with Testcontainers and stubs the other services.
 
 ## Build and test
 
@@ -22,16 +25,22 @@ export JAVA_HOME="/c/Program Files/Java/jdk-25.0.5.0.3"
 ./mvnw -pl services/order-service -am spring-boot:run
 ```
 
-The process listens on port 8084 unless `SERVER_PORT` is set.
+The process listens on port 8084 unless `SERVER_PORT` is set. A local run needs `order_db`, Keycloak, and the catalog, inventory, and payment processes.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/actuator/health` | Process health |
-| GET | `/actuator/health/liveness` | Liveness probe |
-| GET | `/actuator/health/readiness` | Readiness probe |
-| GET | `/api/v1/orders/info` | Service name, version, and status |
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/actuator/health` | Public | Process health |
+| GET | `/api/v1/orders/info` | Public | Service name, version, and status |
+| POST | `/api/v1/orders/checkout` | Bearer JWT | Reserve stock, create the order, and simulate payment. Requires `Idempotency-Key` |
+| GET | `/api/v1/orders` | Bearer JWT | The caller's orders. An admin sees the latest 20 |
+| GET | `/api/v1/orders/{id}` | Buyer or admin | Order, item price snapshot, and status history |
+| POST | `/api/v1/orders/{id}/cancel` | Buyer or admin | Cancel a `PENDING_PAYMENT` order and release its holds |
+
+Statuses used here are `PENDING_PAYMENT`, `CONFIRMED`, `PAYMENT_FAILED`, and `CANCELLED`.
+
+If payment cannot be reached after the order is stored, the response is 503. Send the same key again. Holds that were released after a stock rejection need a new key. A hold that nobody completes expires in the inventory service.
 
 ## Configuration
 
@@ -43,7 +52,10 @@ The process listens on port 8084 unless `SERVER_PORT` is set.
 | `DB_PASSWORD` | `order_local` | Local database password |
 | `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
 | `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
+| `CATALOG_SERVICE_URL` | `http://localhost:8082` | Catalog base URL |
+| `INVENTORY_SERVICE_URL` | `http://localhost:8083` | Inventory base URL |
+| `PAYMENT_SERVICE_URL` | `http://localhost:8085` | Payment base URL |
 
 ## Versions
 
-Java 25 and Spring Boot 4.1.2 are pinned in the parent POM.
+Java 25 and Spring Boot 4.1.2 are pinned in the parent POM. Schema changes go through Flyway. Hibernate `ddl-auto` is `none`.

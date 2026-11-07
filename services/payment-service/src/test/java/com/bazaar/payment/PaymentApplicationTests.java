@@ -1,12 +1,17 @@
 package com.bazaar.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPublicKey;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,9 +22,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @SpringBootTest(properties = "bazaar.security.jwt.remote=false")
@@ -69,6 +77,132 @@ class PaymentApplicationTests {
     void unknownApiRequiresAToken() throws Exception {
         mockMvc.perform(get("/api/v1/payments/private"))
                 .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/v1/payments").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void successIsIdempotentAndBlocksASecondCharge() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        MvcResult created = mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-a"))
+                        .header("Idempotency-Key", "pay-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "25.00")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.amount").value(25.00))
+                .andExpect(jsonPath("$.attempts[0].type").value("CREATE"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-a"))
+                        .header("Idempotency-Key", "pay-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "25.00")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-a"))
+                        .header("Idempotency-Key", "pay-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "10.00")))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/v1/payments/" + id).with(customer("payer-other")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.attempts[1].type").value("SIMULATE_SUCCESS"));
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.attempts.length()").value(2));
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-failure").with(customer("payer-a")))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-a"))
+                        .header("Idempotency-Key", "pay-key-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "25.00")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("This order already has a payment."));
+    }
+
+    @Test
+    void failureAllowsAnotherPaymentForTheSameOrder() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        MvcResult created = mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-fail"))
+                        .header("Idempotency-Key", "fail-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "8.50")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-failure").with(customer("payer-fail")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"));
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-failure").with(customer("payer-fail")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"));
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-fail")))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-fail"))
+                        .header("Idempotency-Key", "fail-key-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "8.50")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    @Test
+    void cancelStopsThePayment() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        MvcResult created = mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-cancel"))
+                        .header("Idempotency-Key", "cancel-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "3.00")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/v1/payments/" + id + "/cancel").with(customer("payer-cancel")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(customer("payer-cancel")))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void invalidAmountIsRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-bad"))
+                        .header("Idempotency-Key", "bad-amount-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(UUID.randomUUID(), "0")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("amount is invalid"));
+    }
+
+    private static String body(UUID orderId, String amount) {
+        return "{\"orderId\":\"" + orderId + "\",\"amount\":" + amount + ",\"currency\":\"USD\"}";
+    }
+
+    private static RequestPostProcessor customer(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("CUSTOMER"))));
     }
 
     @TestConfiguration(proxyBeanMethods = false)

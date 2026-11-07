@@ -31,9 +31,9 @@ The process listens on port 8082 unless `SERVER_PORT` is set. A local run needs 
 | --- | --- | --- | --- |
 | GET | `/actuator/health` | Public | Process health |
 | GET | `/api/v1/catalog/info` | Public | Service name, version, and status |
-| GET | `/api/v1/categories` | Bearer JWT | List categories |
-| GET | `/api/v1/products` | Bearer JWT | Search active products. Sellers pass `mine=true` to see their own drafts |
-| GET | `/api/v1/products/{id}` | Bearer JWT | One product. Drafts are visible to the owner and an admin |
+| GET | `/api/v1/categories` | Public | List categories |
+| GET | `/api/v1/products` | Public | Search active products. A signed-in seller passes `mine=true` to see their own drafts |
+| GET | `/api/v1/products/{id}` | Public | One active product. Drafts are visible to the owner and an admin |
 | POST | `/api/v1/products` | Seller or admin | Create a draft. The seller id is the token subject |
 | PUT | `/api/v1/products/{id}` | Owner or admin | Replace the editable fields. Status stays unchanged |
 | PATCH | `/api/v1/products/{id}/status` | Owner or admin | Move among `DRAFT`, `ACTIVE`, `INACTIVE`, and `ARCHIVED` |

@@ -79,8 +79,22 @@ class CatalogApplicationTests {
         mockMvc.perform(get("/api/v1/catalog/private"))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(get("/api/v1/products"))
+        mockMvc.perform(post("/api/v1/products").contentType("application/json").content("{}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anonymousSeesActiveProductsOnly() throws Exception {
+        mockMvc.perform(get("/api/v1/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(2));
+
+        mockMvc.perform(get("/api/v1/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(3));
+
+        mockMvc.perform(get("/api/v1/products/8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1003"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

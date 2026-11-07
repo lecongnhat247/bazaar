@@ -42,7 +42,7 @@ Phase 2 stores a profile for the Keycloak subject and the application roles `CUS
 
 Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`. Both stay public.
 
-Phase 2 stores categories, products, image metadata, and flexible attributes in JSONB. Customers with a token see `ACTIVE` products only. A seller creates a product as `DRAFT` and publishes it with a status change. The seller id comes from the token. Stock quantities stay in inventory. There is no product variant in this milestone.
+Phase 2 stores categories, products, image metadata, and flexible attributes in JSONB. A public product read returns `ACTIVE` products only. A seller creates a product as `DRAFT` and publishes it with a status change. The seller id comes from the token. Stock quantities stay in inventory. There is no product variant in this milestone.
 
 ## Inventory Service
 
@@ -52,9 +52,9 @@ Phase 2 stores categories, products, image metadata, and flexible attributes in 
 | Port | 8080 in a container, 8083 as a local process |
 | Data | PostgreSQL `inventory_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/inventory/info`. The info path stays public. Other paths require a JWT. Stock tables are a later milestone.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/inventory/info`. Both stay public.
 
-Later, this service owns stock quantities, reservations, reservation expiry, and movement history. Stock changes must be atomic in the database.
+Phase 2 stores on-hand stock, holds, and movement history in `inventory_db`. A hold decrements available stock with one conditional SQL update, so concurrent checkouts cannot oversell. Holds expire and return stock. Committing a hold keeps the stock sold and clears the reserved count. There is no foreign key to the catalog.
 
 ## Order Service
 
@@ -64,9 +64,9 @@ Later, this service owns stock quantities, reservations, reservation expiry, and
 | Port | 8080 in a container, 8084 as a local process |
 | Data | PostgreSQL `order_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. The info path stays public. Other paths require a JWT. Order tables are a later milestone.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. Both stay public.
 
-Later, this service owns order creation, retrieval, cancellation, and explicit state transitions: `PENDING`, `PENDING_PAYMENT`, `CONFIRMED`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`, and `PAYMENT_FAILED`.
+Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYMENT` order, and asks payment to simulate success or failure. Success confirms the order and commits the reservation. Failure marks `PAYMENT_FAILED` and releases the reservation. A customer can cancel only while payment is still pending. The service calls the other three over HTTP and does not read their databases. There is no shipping status in this milestone.
 
 ## Payment Service
 
@@ -76,9 +76,9 @@ Later, this service owns order creation, retrieval, cancellation, and explicit s
 | Port | 8080 in a container, 8085 as a local process |
 | Data | PostgreSQL `payment_db`. |
 
-Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`. The info path stays public. Other paths require a JWT. Payment tables are a later milestone.
+Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`. Both stay public.
 
-Later, this service simulates payment processing and stores payment attempts. An idempotency key must prevent a repeated request from creating a second successful charge. A real payment provider is out of scope until a later decision.
+Phase 2 stores mock payments and payment attempts. A payment is bound to an order id and an amount. The same idempotency key cannot create a second payment, and an order cannot have two pending or successful payments. Success and failure are simulated. There is no card network and no call to the order service yet.
 
 ## Storefront
 
@@ -88,16 +88,16 @@ Later, this service simulates payment processing and stores payment attempts. An
 | Port | 3000 |
 | Data | None |
 
-Phase 1 serves a responsive landing page, a simple navigation layout, and a gateway connectivity check with loading, success, and error states.
+Phase 1 serves a responsive landing page and a gateway connectivity check.
 
-The storefront does not own accounts, products, a cart, or checkout.
+Phase 2 adds the customer shop: product list and detail, a browser cart, Keycloak sign-in, checkout, payment simulation, and order history. The browser calls the storefront. The storefront calls the gateway with the access token from an HTTP-only cookie. Product prices in the cart are only a preview.
 
 ## Ownership rules
 
 - Each future database belongs to exactly one service. Tables are not shared.
 - The gateway and the storefront do not own a database.
-- Phase 1 services do not call each other. Only the gateway holds downstream URLs.
-- A later checkout flow may call inventory and payment from the order service, or move that coordination to events. That choice is deferred. [ADR-003](../adr/ADR-003-rest-communication.md) keeps Phase 1 on synchronous REST.
+- The gateway does not call a database. It forwards the caller's token.
+- Checkout is synchronous REST. The order service calls catalog, inventory, and payment with the caller's token. It does not share their tables. [ADR-003](../adr/ADR-003-rest-communication.md) still defers events and a Saga.
 
 ## Later services
 

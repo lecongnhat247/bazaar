@@ -14,13 +14,19 @@ Phase 1 includes:
 - Multi-stage container images, Docker Compose, a single-node kind cluster, and a Helm chart.
 - GitHub Actions for build, test, image build, and GHCR publishing rules.
 
-Phase 1 leaves these for later work:
+Phase 1 left these for later work:
 
 - Registration, login, JWT, and refresh tokens.
 - Product, cart, checkout, inventory, and payment behavior.
 - Databases, Kafka, Redis, Saga, and the transactional outbox.
 - WebSocket, notifications, recommendations, analytics, and extra frontends.
 - Ingress, TLS, DNS, Terraform, and any cloud cluster.
+
+## Phase 2
+
+Phase 2 delivers the customer purchase path on one PostgreSQL server and Keycloak. Each business service still has its own database. Checkout is synchronous REST: the order service reads the catalog price, reserves stock, stores the order, and simulates payment. Success commits the reservation. Failure releases it. The storefront keeps the cart in the browser and the access token in an HTTP-only cookie.
+
+Still later: Kafka, the transactional outbox, a Saga framework, Redis, a real payment provider, WebSocket, and the extra frontends. The kind chart does not run Postgres or Keycloak, so that cluster cannot serve this purchase path yet.
 
 ## Principles
 

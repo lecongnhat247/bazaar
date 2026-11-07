@@ -1,11 +1,14 @@
 # Payment Service
 
-Spring Boot service for BAZAAR payments. Payment simulation is a later milestone. This process owns `payment_db`, validates Keycloak JWTs, and leaves health and `/api/v1/payments/info` public.
+Stores mock payments and the attempts made against them. It does not call a bank or the order service. The order id and amount are recorded here so a later checkout can attach them to an order.
+
+A repeated request with the same `Idempotency-Key` returns the original payment. An order can have only one `PENDING` or `SUCCEEDED` payment. A `FAILED` or `CANCELLED` payment leaves the order free for another attempt.
 
 ## Requirements
 
 - JDK 25 on `JAVA_HOME`
 - Maven Wrapper at the repository root
+- PostgreSQL for a local run. `./mvnw test` starts its own database with Testcontainers.
 
 ## Build and test
 
@@ -22,16 +25,21 @@ export JAVA_HOME="/c/Program Files/Java/jdk-25.0.5.0.3"
 ./mvnw -pl services/payment-service -am spring-boot:run
 ```
 
-The process listens on port 8085 unless `SERVER_PORT` is set.
+The process listens on port 8085 unless `SERVER_PORT` is set. A local run needs `payment_db` and a Keycloak issuer. Compose provides both.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/actuator/health` | Process health |
-| GET | `/actuator/health/liveness` | Liveness probe |
-| GET | `/actuator/health/readiness` | Readiness probe |
-| GET | `/api/v1/payments/info` | Service name, version, and status |
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/actuator/health` | Public | Process health |
+| GET | `/api/v1/payments/info` | Public | Service name, version, and status |
+| POST | `/api/v1/payments` | Bearer JWT | Create a `PENDING` payment. Requires `Idempotency-Key` |
+| GET | `/api/v1/payments/{id}` | Payer or admin | Read the payment and its attempts |
+| POST | `/api/v1/payments/{id}/simulate-success` | Payer or admin | Mark a pending payment `SUCCEEDED` |
+| POST | `/api/v1/payments/{id}/simulate-failure` | Payer or admin | Mark a pending payment `FAILED` |
+| POST | `/api/v1/payments/{id}/cancel` | Payer or admin | Mark a pending payment `CANCELLED` |
+
+The payer id comes from the token. Repeating success, failure, or cancel on a payment that already has that status returns the same payment and does not add another attempt.
 
 ## Configuration
 
@@ -46,4 +54,4 @@ The process listens on port 8085 unless `SERVER_PORT` is set.
 
 ## Versions
 
-Java 25 and Spring Boot 4.1.2 are pinned in the parent POM.
+Java 25 and Spring Boot 4.1.2 are pinned in the parent POM. Schema changes go through Flyway. Hibernate `ddl-auto` is `none`.

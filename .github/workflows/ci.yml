@@ -51,9 +51,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/storefront/package-lock.json
 
-      - name: Install, lint, and build
+      - name: Install, test, lint, and build
         run: |
           npm ci
+          npm test
           npm run lint
           npm run build
 
