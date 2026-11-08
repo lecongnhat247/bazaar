@@ -2,7 +2,7 @@
 
 Runs checkout. The price comes from the catalog. The client cannot set it. Stock is reserved in the inventory service, then a mock payment is created in the payment service. Nothing here talks to a bank or reads another service's database.
 
-The process writes `order.pending-payment` when the order is stored and `order.confirmed`, `order.payment-failed`, or `order.cancelled` when that status is stored. The outbox row is in the same database transaction. A poller publishes `bazaar.order.events` after the broker acknowledges the record, and the consumer applies each `eventId` once. A stopped Kafka broker does not fail readiness. A message that still fails after retries is logged and skipped. There is no dead-letter topic yet. The contract is in `contracts/events/README.md`.
+Checkout returns `PENDING_INVENTORY` and finishes in the background. The order service is the saga coordinator. It sends inventory and payment commands from its outbox and moves the order only when the matching event arrives. States are `PENDING_INVENTORY`, `PENDING_PAYMENT`, `PENDING_INVENTORY_COMMIT`, `COMPENSATING`, `CONFIRMED`, `PAYMENT_FAILED`, `CANCELLED`, and `FAILED`. A stuck step is sent again. After three failed commits, or when the step times out, a successful payment is refunded. A stopped Kafka broker does not fail readiness. A message that still fails after retries is logged and skipped. There is no dead-letter topic yet. The contract is in `contracts/events/README.md`.
 
 `outcome` is `SUCCESS` or `FAILURE`. That chooses the mock payment result. A repeated checkout with the same `Idempotency-Key` and the same items returns the original order.
 

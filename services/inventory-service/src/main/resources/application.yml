@@ -59,6 +59,7 @@ logging:
 bazaar:
   inventory:
     events-topic: ${INVENTORY_EVENTS_TOPIC:bazaar.inventory.events}
+    commands-topic: ${INVENTORY_COMMANDS_TOPIC:bazaar.inventory.commands}
     reservation-ttl: ${INVENTORY_RESERVATION_TTL:PT15M}
   security:
     jwt:

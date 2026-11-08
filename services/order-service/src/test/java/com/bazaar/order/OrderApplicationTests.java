@@ -44,12 +44,22 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.bazaar.order.checkout.SagaCoordinator;
+import com.bazaar.order.messaging.EventEnvelope;
 import com.bazaar.order.messaging.OrderEventConsumer;
 import com.bazaar.order.outbox.OutboxPublisher;
+
+import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-@SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
+@SpringBootTest(properties = {
+        "bazaar.security.jwt.remote=false",
+        "bazaar.outbox.poll-delay=3600000",
+        "bazaar.saga.recover-delay=3600000",
+        "bazaar.saga.resend-after=PT24H",
+        "bazaar.saga.give-up-after=PT48H"
+})
 @AutoConfigureMockMvc
 @Import({OrderApplicationTests.DatabaseTestConfiguration.class, OrderApplicationTests.TestJwtConfiguration.class})
 class OrderApplicationTests {
@@ -83,6 +93,12 @@ class OrderApplicationTests {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private SagaCoordinator saga;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @DynamicPropertySource
     static void downstream(DynamicPropertyRegistry registry) {
@@ -139,7 +155,7 @@ class OrderApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(LAMP, 1, "SUCCESS")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"))
                 .andReturn();
         String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
         Integer pending = jdbc.queryForObject(
@@ -148,23 +164,23 @@ class OrderApplicationTests {
                 id);
         assertThat(pending).isEqualTo(2);
         outbox.publishPending();
-        waitUntilProcessed(id, 2);
+        waitUntilProcessed(id, 1);
         jdbc.update("UPDATE outbox SET status = 'PENDING', claimed_at = NULL, published_at = NULL WHERE aggregate_id = ?", id);
         outbox.publishPending();
         Thread.sleep(1000);
-        assertThat(processed(id)).isEqualTo(2);
+        assertThat(processed(id)).isEqualTo(1);
     }
 
     @Test
     void rejectedCheckoutWritesNoOutboxRow() throws Exception {
         Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
-        fault = "STOCK";
+        fault = "CATALOG";
         mockMvc.perform(post("/api/v1/orders/checkout")
                         .with(customer("buyer-outbox-stock"))
                         .header("Idempotency-Key", "order-key-outbox-stock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(SHIRT, 1, "SUCCESS")))
-                .andExpect(status().isConflict());
+                .andExpect(status().isServiceUnavailable());
         Integer after = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
         assertThat(after).isEqualTo(before);
     }
@@ -242,13 +258,12 @@ class OrderApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(LAMP, 2, "SUCCESS")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"))
                 .andExpect(jsonPath("$.currency").value("USD"))
                 .andExpect(jsonPath("$.total").value(50.00))
                 .andExpect(jsonPath("$.items[0].unitPrice").value(25.00))
                 .andExpect(jsonPath("$.items[0].name").value("Desk lamp"))
-                .andExpect(jsonPath("$.history[0].status").value("PENDING_PAYMENT"))
-                .andExpect(jsonPath("$.history[1].status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.history[0].status").value("PENDING_INVENTORY"))
                 .andReturn();
         String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
 
@@ -268,11 +283,8 @@ class OrderApplicationTests {
                 .andExpect(status().isConflict());
 
         mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-ok")))
-                .andExpect(status().isConflict());
-
-        assertThat(RESERVES.get()).isEqualTo(1);
-        assertThat(COMMITS.get()).isEqualTo(1);
-        assertThat(RELEASES.get()).isZero();
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
 
     @Test
@@ -283,12 +295,8 @@ class OrderApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(LAMP, 1, "FAILURE")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PAYMENT_FAILED"))
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"))
                 .andExpect(jsonPath("$.total").value(25.00));
-
-        assertThat(RESERVES.get()).isEqualTo(1);
-        assertThat(COMMITS.get()).isZero();
-        assertThat(RELEASES.get()).isEqualTo(1);
     }
 
     @Test
@@ -300,13 +308,12 @@ class OrderApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"items\":[{\"productId\":\"" + LAMP + "\",\"quantity\":1},{\"productId\":\"" + SHIRT
                                 + "\",\"quantity\":1}],\"outcome\":\"SUCCESS\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("Not enough stock is available. Use a new Idempotency-Key to try again."));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"));
 
         mockMvc.perform(get("/api/v1/orders").with(customer("buyer-stock")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
-        assertThat(RELEASES.get()).isEqualTo(1);
+                .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
@@ -327,30 +334,166 @@ class OrderApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(LAMP, 1, "SUCCESS")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"));
     }
 
     @Test
-    void paymentOutageLeavesAnOrderThatCanBeCancelled() throws Exception {
-        fault = "PAYMENT";
-        mockMvc.perform(post("/api/v1/orders/checkout")
+    void pendingOrderCanBeCancelledBeforeInventoryReserves() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
                         .with(customer("buyer-hold"))
                         .header("Idempotency-Key", "order-key-hold")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(LAMP, 1, "SUCCESS")))
-                .andExpect(status().isServiceUnavailable());
-        assertThat(RELEASES.get()).isZero();
-
-        MvcResult listed = mockMvc.perform(get("/api/v1/orders").with(customer("buyer-hold")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].status").value("PENDING_PAYMENT"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY"))
                 .andReturn();
-        String id = com.jayway.jsonpath.JsonPath.read(listed.getResponse().getContentAsString(), "$[0].id");
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
 
         mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-hold")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
-        assertThat(RELEASES.get()).isEqualTo(1);
+    }
+
+    @Test
+    void paymentFailureReleasesTheReservationAndConfirmsOnlyAfterCommit() throws Exception {
+        String failed = checkout("buyer-saga-fail", "saga-fail-1", "FAILURE");
+        UUID reservationId = UUID.randomUUID();
+        saga.accept(reserved(failed, LAMP, reservationId));
+        mockMvc.perform(get("/api/v1/orders/" + failed).with(customer("buyer-saga-fail")))
+                .andExpect(jsonPath("$.status").value("PENDING_PAYMENT"));
+        saga.accept(payment(failed, "payment.failed"));
+        mockMvc.perform(get("/api/v1/orders/" + failed).with(customer("buyer-saga-fail")))
+                .andExpect(jsonPath("$.status").value("COMPENSATING"));
+        saga.accept(stock(reservationId, "inventory.released"));
+        mockMvc.perform(get("/api/v1/orders/" + failed).with(customer("buyer-saga-fail")))
+                .andExpect(jsonPath("$.status").value("PAYMENT_FAILED"));
+
+        String confirmed = checkout("buyer-saga-ok", "saga-ok-1", "SUCCESS");
+        UUID committed = UUID.randomUUID();
+        saga.accept(reserved(confirmed, LAMP, committed));
+        saga.accept(payment(confirmed, "payment.succeeded"));
+        mockMvc.perform(get("/api/v1/orders/" + confirmed).with(customer("buyer-saga-ok")))
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY_COMMIT"));
+        saga.accept(reserved(confirmed, LAMP, committed));
+        mockMvc.perform(get("/api/v1/orders/" + confirmed).with(customer("buyer-saga-ok")))
+                .andExpect(jsonPath("$.status").value("PENDING_INVENTORY_COMMIT"));
+        saga.accept(stock(committed, "inventory.committed"));
+        mockMvc.perform(get("/api/v1/orders/" + confirmed).with(customer("buyer-saga-ok")))
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        Integer commits = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ? AND event_type = 'inventory.commit-requested'",
+                Integer.class,
+                committed.toString());
+        assertThat(commits).isEqualTo(1);
+    }
+
+    @Test
+    void reservationFailureDoesNotRequestPayment() throws Exception {
+        String id = checkout("buyer-saga-stock", "saga-stock-1", "SUCCESS");
+        saga.accept(failedReservation(id));
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-saga-stock")))
+                .andExpect(jsonPath("$.status").value("FAILED"));
+        Integer payments = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ? AND event_type = 'payment.requested'",
+                Integer.class,
+                id);
+        assertThat(payments).isZero();
+    }
+
+    @Test
+    void commitFailureRefundsThePayment() throws Exception {
+        String id = checkout("buyer-saga-refund", "saga-refund-1", "SUCCESS");
+        UUID reservationId = UUID.randomUUID();
+        saga.accept(reserved(id, LAMP, reservationId));
+        saga.accept(payment(id, "payment.succeeded"));
+        UUID paymentId = jdbc.queryForObject("SELECT payment_id FROM customer_order WHERE id = ?::uuid", UUID.class, id);
+        saga.accept(commitFailed(id, reservationId));
+        saga.accept(commitFailed(id, reservationId));
+        saga.accept(commitFailed(id, reservationId));
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-saga-refund")))
+                .andExpect(jsonPath("$.status").value("COMPENSATING"));
+        Integer refunds = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE event_type = 'payment.refund-requested' AND aggregate_id = ?",
+                Integer.class,
+                paymentId.toString());
+        assertThat(refunds).isEqualTo(1);
+        saga.accept(refunded(id, paymentId));
+        saga.accept(stock(reservationId, "inventory.released"));
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-saga-refund")))
+                .andExpect(jsonPath("$.status").value("FAILED"));
+    }
+
+    @Test
+    void recoveryResendsTheReservationCommand() throws Exception {
+        String id = checkout("buyer-saga-recover", "saga-recover-1", "SUCCESS");
+        jdbc.update("UPDATE outbox SET status = 'PUBLISHED' WHERE aggregate_id = ? AND event_type = 'inventory.reservation-requested'", id);
+        jdbc.update("UPDATE customer_order SET updated_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minus(java.time.Duration.ofHours(30))), id);
+        saga.recover();
+        Integer commands = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE aggregate_id = ? AND event_type = 'inventory.reservation-requested'",
+                Integer.class,
+                id);
+        assertThat(commands).isEqualTo(2);
+    }
+
+    private String checkout(String customer, String key, String outcome) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer(customer))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, outcome)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+    }
+
+    private EventEnvelope reserved(String orderId, UUID productId, UUID reservationId) {
+        return event("inventory.reserved", reservationId.toString(), UUID.fromString(orderId),
+                "{\"productId\":\"" + productId + "\",\"orderId\":\"" + orderId + "\",\"quantity\":1,\"status\":\"HELD\"}");
+    }
+
+    private EventEnvelope failedReservation(String orderId) {
+        return event("inventory.reservation-failed", orderId, UUID.fromString(orderId),
+                "{\"orderId\":\"" + orderId + "\",\"reason\":\"Not enough stock is available.\"}");
+    }
+
+    private EventEnvelope payment(String orderId, String type) {
+        UUID paymentId = UUID.randomUUID();
+        return event(type, paymentId.toString(), paymentId,
+                "{\"orderId\":\"" + orderId + "\",\"amount\":\"25.00\",\"currency\":\"USD\",\"status\":\"" + type + "\"}");
+    }
+
+    private EventEnvelope stock(UUID reservationId, String type) {
+        return event(type, reservationId.toString(), reservationId, "{\"reservationId\":\"" + reservationId + "\"}");
+    }
+
+    private EventEnvelope commitFailed(String orderId, UUID reservationId) {
+        return event("inventory.commit-failed", orderId, UUID.fromString(orderId),
+                "{\"orderId\":\"" + orderId + "\",\"reservationId\":\"" + reservationId + "\"}");
+    }
+
+    private EventEnvelope refunded(String orderId, UUID paymentId) {
+        return event("payment.refunded", paymentId.toString(), paymentId,
+                "{\"orderId\":\"" + orderId + "\",\"status\":\"REFUNDED\"}");
+    }
+
+    private EventEnvelope event(String type, String aggregateId, UUID correlationId, String payload) {
+        try {
+            return new EventEnvelope(
+                    UUID.randomUUID(),
+                    type,
+                    1,
+                    aggregateId,
+                    "inventory",
+                    null,
+                    Instant.parse("2026-11-08T00:00:00Z"),
+                    correlationId,
+                    null,
+                    "test",
+                    objectMapper.readTree(payload));
+        } catch (RuntimeException exception) {
+            throw exception;
+        }
     }
 
     @Test

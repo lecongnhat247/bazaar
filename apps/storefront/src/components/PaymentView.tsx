@@ -65,7 +65,7 @@ export function PaymentView() {
       <p className={styles.kicker}>Payment simulation</p>
       <h1 className={styles.title}>No card is charged.</h1>
       <p className={styles.lede}>
-        Success confirms the order and keeps the stock sold. Failure releases the hold and marks the order failed.
+        The order is saved immediately. Success or failure finishes in the background. Open the order and refresh to see the result.
       </p>
       <div className={styles.actions}>
         <button className={styles.button} type="button" disabled={pending !== null} onClick={() => void pay("SUCCESS")}>

@@ -100,7 +100,10 @@ export function OrderDetail({ id }: { id: string }) {
             <li key={`${entry.status}-${entry.createdAt}`}>{entry.status}</li>
           ))}
         </ol>
-        {order.status === "PENDING_PAYMENT" ? (
+        {order.status === "PENDING_INVENTORY" || order.status === "PENDING_PAYMENT" || order.status === "COMPENSATING" ? (
+          <p className={styles.muted}>This checkout is still running. Refresh to see the latest status.</p>
+        ) : null}
+        {order.status === "PENDING_INVENTORY" || order.status === "PENDING_PAYMENT" ? (
           <button className={styles.buttonQuiet} type="button" onClick={() => void cancel()}>Cancel order</button>
         ) : null}
         {error ? <p className={styles.error}>{error}</p> : null}

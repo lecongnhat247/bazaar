@@ -67,6 +67,14 @@ bazaar:
     inventory-url: ${INVENTORY_SERVICE_URL:http://localhost:8083}
     payment-url: ${PAYMENT_SERVICE_URL:http://localhost:8085}
     events-topic: ${ORDER_EVENTS_TOPIC:bazaar.order.events}
+    inventory-events-topic: ${INVENTORY_EVENTS_TOPIC:bazaar.inventory.events}
+    payment-events-topic: ${PAYMENT_EVENTS_TOPIC:bazaar.payment.events}
+    inventory-commands-topic: ${INVENTORY_COMMANDS_TOPIC:bazaar.inventory.commands}
+    payment-commands-topic: ${PAYMENT_COMMANDS_TOPIC:bazaar.payment.commands}
+  saga:
+    recover-delay: ${SAGA_RECOVER_DELAY:15000}
+    resend-after: ${SAGA_RESEND_AFTER:PT20S}
+    give-up-after: ${SAGA_GIVE_UP_AFTER:PT2M}
   outbox:
     poll-delay: ${OUTBOX_POLL_DELAY:1000}
     batch-size: ${OUTBOX_BATCH_SIZE:20}

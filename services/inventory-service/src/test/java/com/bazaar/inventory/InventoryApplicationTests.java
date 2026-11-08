@@ -45,6 +45,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.bazaar.inventory.messaging.CommandConsumer;
 import com.bazaar.inventory.messaging.ServiceEventConsumer;
 import com.bazaar.inventory.outbox.OutboxPublisher;
 
@@ -78,6 +79,9 @@ class InventoryApplicationTests {
 
     @Autowired
     private ServiceEventConsumer events;
+
+    @Autowired
+    private CommandConsumer commands;
 
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
@@ -401,6 +405,47 @@ class InventoryApplicationTests {
                 WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
                 """, Integer.class, aggregateId);
         return count == null ? 0 : count;
+    }
+
+    @Test
+    void reservationCommandTakesStockOnceAndReportsAShortage() throws Exception {
+        UUID productId = UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/inventory/products/" + productId)
+                        .with(seller("seller-command"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"onHand\":1}"))
+                .andExpect(status().isOk());
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        String body = command(eventId, orderId, productId, 1);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.inventory.commands", 0, 0L, orderId.toString(), body);
+        commands.onCommand(record);
+        commands.onCommand(record);
+        mockMvc.perform(get("/api/v1/inventory/products/" + productId).with(customer("customer-command")))
+                .andExpect(jsonPath("$.available").value(0))
+                .andExpect(jsonPath("$.reserved").value(1));
+        Integer reserved = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE event_type = 'inventory.reserved' AND correlation_id = ?",
+                Integer.class,
+                orderId);
+        assertThat(reserved).isEqualTo(1);
+
+        UUID failedOrder = UUID.randomUUID();
+        commands.onCommand(new ConsumerRecord<>("bazaar.inventory.commands", 0, 1L, failedOrder.toString(),
+                command(UUID.randomUUID(), failedOrder, productId, 1)));
+        Integer failures = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE event_type = 'inventory.reservation-failed' AND aggregate_id = ?",
+                Integer.class,
+                failedOrder.toString());
+        assertThat(failures).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/inventory/products/" + productId).with(customer("customer-command")))
+                .andExpect(jsonPath("$.available").value(0));
+    }
+
+    private static String command(UUID eventId, UUID orderId, UUID productId, int quantity) {
+        return """
+                {"eventId":"%s","eventType":"inventory.reservation-requested","eventVersion":1,"aggregateId":"%s","aggregateType":"command","occurredAt":"2026-11-08T00:00:00Z","correlationId":"%s","producer":"order-service","payload":{"orderId":"%s","customerId":"customer-command","items":[{"productId":"%s","quantity":%d}]}}
+                """.formatted(eventId, orderId, orderId, orderId, productId, quantity);
     }
 
     private static RequestPostProcessor customer(String subject) {

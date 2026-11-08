@@ -1,11 +1,11 @@
 package com.bazaar.order.messaging;
 
-final class EventRules {
+public final class EventRules {
 
     private EventRules() {
     }
 
-    static void require(EventEnvelope event) {
+    public static void require(EventEnvelope event) {
         if (event == null || event.eventId() == null || blank(event.eventType())) {
             throw new IllegalArgumentException("Event requires eventId and eventType.");
         }

@@ -35,6 +35,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.bazaar.payment.messaging.CommandConsumer;
 import com.bazaar.payment.messaging.ServiceEventConsumer;
 import com.bazaar.payment.outbox.OutboxPublisher;
 
@@ -65,6 +66,9 @@ class PaymentApplicationTests {
 
     @Autowired
     private ServiceEventConsumer events;
+
+    @Autowired
+    private CommandConsumer commands;
 
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
@@ -300,6 +304,27 @@ class PaymentApplicationTests {
                 WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
                 """, Integer.class, aggregateId);
         return count == null ? 0 : count;
+    }
+
+    @Test
+    void paymentCommandSucceedsOnce() {
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        String body = """
+                {"eventId":"%s","eventType":"payment.requested","eventVersion":1,"aggregateId":"%s","aggregateType":"command","occurredAt":"2026-11-08T00:00:00Z","correlationId":"%s","producer":"order-service","payload":{"orderId":"%s","customerId":"payer-command","amount":"10.00","currency":"USD","outcome":"SUCCESS"}}
+                """.formatted(eventId, orderId, orderId, orderId);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.payment.commands", 0, 0L, orderId.toString(), body);
+        commands.onCommand(record);
+        commands.onCommand(record);
+        Integer payments = jdbc.queryForObject("SELECT COUNT(*) FROM payment WHERE order_id = ?", Integer.class, orderId);
+        String status = jdbc.queryForObject("SELECT status FROM payment WHERE order_id = ?", String.class, orderId);
+        Integer events = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE event_type = 'payment.succeeded' AND correlation_id IN (SELECT id FROM payment WHERE order_id = ?)",
+                Integer.class,
+                orderId);
+        assertThat(payments).isEqualTo(1);
+        assertThat(status).isEqualTo("SUCCEEDED");
+        assertThat(events).isEqualTo(1);
     }
 
     private static String body(UUID orderId, String amount) {

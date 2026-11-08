@@ -58,7 +58,7 @@ public class OutboxPublisher {
         }
         for (OutboxMessage message : store.claim(batchSize, now)) {
             try {
-                events.publishOrderEvent(envelope(message));
+                events.publish(message.topic(), envelope(message));
                 store.markPublished(message.id(), Instant.now());
                 published.increment();
             } catch (RuntimeException exception) {

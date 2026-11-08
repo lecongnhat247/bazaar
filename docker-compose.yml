@@ -287,7 +287,7 @@ services:
     command:
       - |
         set -eu
-        for topic in bazaar.order.events bazaar.inventory.events bazaar.payment.events bazaar.catalog.events; do
+        for topic in bazaar.order.events bazaar.inventory.events bazaar.payment.events bazaar.catalog.events bazaar.inventory.commands bazaar.payment.commands; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 --config retention.ms=3600000 --config retention.bytes=67108864
         done
     mem_limit: 256m

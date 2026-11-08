@@ -2,7 +2,9 @@
 
 Kafka carries JSON envelopes. A service does not share its Java domain classes with another service. `eventVersion` is the schema version named `schemaVersion` in [ADR-003](../../docs/adr/ADR-003-rest-communication.md).
 
-Catalog, inventory, order, and payment publish the facts below from a local outbox table. The business row and the outbox row commit together. A poller sends the JSON after that commit and marks the row published only after the broker acknowledges it. If the process stops between the acknowledgement and that update, the same `eventId` is sent again. Each service stores `(consumer_name, event_id)` in `processed_events` and skips a duplicate. Delivery is at-least-once. This is not exactly-once, and there is no dead-letter topic yet. Checkout HTTP is unchanged.
+Catalog, inventory, order, and payment publish the facts below from a local outbox table. The business row and the outbox row commit together. A poller sends the JSON after that commit and marks the row published only after the broker acknowledges it. If the process stops between the acknowledgement and that update, the same `eventId` is sent again. Each service stores `(consumer_name, event_id)` in `processed_events` and skips a duplicate. Delivery is at-least-once. This is not exactly-once, and there is no dead-letter topic yet.
+
+Checkout is a saga. The HTTP call stores the order and returns `PENDING_INVENTORY`. The order service sends commands. Inventory and payment reply with events. The order changes state only when the reply matches the step it is in.
 
 ## Envelope
 
@@ -30,27 +32,36 @@ A new required field needs a new `eventVersion`. Adding an optional field does n
 | `bazaar.inventory.events` | reservation id | 3 | 1 | inventory service | inventory service group `inventory-service` |
 | `bazaar.payment.events` | payment id | 3 | 1 | payment service | payment service group `payment-service` |
 | `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service` |
+| `bazaar.inventory.commands` | order id or reservation id | 3 | 1 | order service | inventory group `inventory-commands` |
+| `bazaar.payment.commands` | order id or payment id | 3 | 1 | order service | payment group `payment-commands` |
 
 Commands, when they arrive, use a separate topic. They are requests. Events are facts that already happened. Local retention is one hour and 64 MB. That is not a production retention policy.
 
 ## Names
 
-`eventType` is `<aggregate>.<fact>` in lower case. Dots separate words that belong together. `aggregateType` is `order`, `inventory`, `payment`, or `catalog`. `correlationId` is the same id as `aggregateId` for these facts. `causationId` is empty. `eventVersion` is 1.
+`eventType` is `<aggregate>.<fact>` in lower case. Dots separate words that belong together. `aggregateType` is `order`, `inventory`, `payment`, `catalog`, or `command`. `causationId` is empty. `eventVersion` is 1. `inventory.reserved` and `inventory.reservation-failed` use the order id as `correlationId`. `inventory.committed` and `inventory.released` use the reservation id, which is also the aggregate id. Payment facts use the payment id. The order saga matches those replies by the order id in the payload, or by the reservation id.
+
+Commands from the order service:
+
+- `inventory.reservation-requested`, `inventory.commit-requested`, `inventory.release-requested`.
+- `payment.requested`, `payment.refund-requested`, `payment.cancel-requested`.
 
 Produced when the business row changes:
 
-- `order.pending-payment`, `order.confirmed`, `order.payment-failed`, `order.cancelled`. Payload: `status`, `currency`, `total`.
+- `order.pending-inventory`, `order.confirmed`, `order.payment-failed`, `order.cancelled`, `order.failed`. Payload: `status`, `currency`, `total`.
+- `inventory.reservation-failed` and `inventory.commit-failed` when a command cannot be applied.
+- `payment.refunded` when a successful payment is compensated.
 - `inventory.reserved`, `inventory.released`, `inventory.committed`, `inventory.expired`. Payload: `productId`, `quantity`, `status`.
 - `payment.succeeded`, `payment.failed`, `payment.cancelled`. Payload: `orderId`, `amount`, `currency`, `status`.
 - `catalog.product-published`, `catalog.product-unpublished`, `catalog.product-updated`. Payload: `name`, `sku`, `price`, `currency`, `status`.
 
-Not produced: a failed reservation, because that request rolls back and leaves no reservation; a stock quantity edit; a draft product create or edit; a repeated call that does not change status.
+Not produced: a stock quantity edit, a draft product create or edit, or a repeated call that does not change status. `inventory.reservation-failed` is produced when the reserve command cannot take stock. There is still no reservation row in that case.
 
 `order.foundation-checked` is only the pipe used by the order-service test. It is not a checkout fact.
 
 ## Example
 
-`order.confirmed` version 1, written by checkout when payment succeeds:
+`order.confirmed` version 1, written after payment has succeeded and the stock hold has been committed:
 
 ```json
 {

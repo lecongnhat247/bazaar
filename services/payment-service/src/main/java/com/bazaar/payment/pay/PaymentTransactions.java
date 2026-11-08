@@ -15,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.bazaar.payment.outbox.OutboxStore;
 
 @Service
-class PaymentTransactions {
+public class PaymentTransactions {
 
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
@@ -25,7 +25,7 @@ class PaymentTransactions {
         this.outbox = outbox;
     }
 
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public CreateOutcome create(
             PaymentAccess access,
             String key,
@@ -98,6 +98,34 @@ class PaymentTransactions {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This payment can no longer change.");
         }
         return load(id);
+    }
+
+    @Transactional
+    public boolean refund(PaymentAccess access, UUID id, Instant now) {
+        PaymentRow current = required(id);
+        if (!current.payerId().equals(access.subject()) && !access.admin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot change this payment.");
+        }
+        if ("REFUNDED".equals(current.status())) {
+            return false;
+        }
+        if (!"SUCCEEDED".equals(current.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This payment can no longer change.");
+        }
+        int changed = jdbc.update("""
+                UPDATE payment
+                SET status = 'REFUNDED', updated_at = ?
+                WHERE id = ? AND status = 'SUCCEEDED'
+                """, Timestamp.from(now), id);
+        if (changed == 1) {
+            attempt(id, "REFUND", "REFUNDED", now);
+            outbox.add("payment.refunded", "payment", id.toString(), id, java.util.Map.of(
+                    "orderId", current.orderId().toString(),
+                    "amount", current.amount().toPlainString(),
+                    "currency", current.currency(),
+                    "status", "REFUNDED"), now);
+        }
+        return changed == 1;
     }
 
     private static String eventType(String status) {

@@ -72,7 +72,7 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. Both stay 
 
 Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYMENT` order, and asks payment to simulate success or failure. Success confirms the order and commits the reservation. Failure marks `PAYMENT_FAILED` and releases the reservation. A customer can cancel only while payment is still pending. The service calls the other three over HTTP and does not read their databases. There is no shipping status in this milestone.
 
-Checkout still returns the order from the same HTTP call. The insert and each later status change also write `bazaar.order.events` to the order outbox in that transaction. The service consumes the topic and applies each `eventId` once. Readiness does not include the broker, so a Kafka outage does not take checkout or product reads down.
+Checkout returns as soon as the order is stored in `PENDING_INVENTORY`. The order service then sends `inventory.reservation-requested` and, after stock is held, `payment.requested`. Payment success asks inventory to commit. Payment failure, a failed reservation, or a customer cancel releases the hold. If commit keeps failing after a successful payment, the saga asks payment to refund and does not leave that payment as succeeded. A scheduler resends the current command when a step is stuck, and gives up when the step is still stuck after the timeout. Readiness does not include the broker.
 
 ## Payment Service
 

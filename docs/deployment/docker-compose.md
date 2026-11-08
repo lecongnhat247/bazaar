@@ -45,7 +45,7 @@ docker compose down
 
 One KRaft process combines the broker and the controller. Clients inside Compose use `kafka:19092`. A process on the host uses `localhost:9092`. Catalog, inventory, order, and payment read `KAFKA_BOOTSTRAP_SERVERS`. None of them wait for Kafka before serving HTTP.
 
-`kafka-init` creates four topics after the broker is healthy: `bazaar.order.events`, `bazaar.inventory.events`, `bazaar.payment.events`, and `bazaar.catalog.events`. Each has 3 partitions and replication factor 1. The init container exits when the topics exist. List them with:
+`kafka-init` creates the event topics and two command topics after the broker is healthy: `bazaar.order.events`, `bazaar.inventory.events`, `bazaar.payment.events`, `bazaar.catalog.events`, `bazaar.inventory.commands`, and `bazaar.payment.commands`. Each has 3 partitions and replication factor 1. The init container exits when the topics exist. List them with:
 
 ```bash
 docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list

@@ -14,7 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.bazaar.inventory.outbox.OutboxStore;
 
 @Service
-class InventoryTransactions {
+public class InventoryTransactions {
 
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
@@ -92,7 +92,7 @@ class InventoryTransactions {
             if (changed == 1) {
                 returnStock(held.productId(), held.quantity(), now);
                 movement(held.productId(), held.id(), "EXPIRE", held.quantity(), now);
-                reservationEvent("inventory.expired", held.id(), held.productId(), held.quantity(), "EXPIRED", now);
+                reservationEvent("inventory.expired", held.id(), held.productId(), held.quantity(), "EXPIRED", now, null);
                 expired++;
             }
         }
@@ -129,8 +129,91 @@ class InventoryTransactions {
                 """, id, productId, quantity, key, hash, access.subject(),
                 Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now));
         movement(productId, id, "RESERVE", quantity, now);
-        reservationEvent("inventory.reserved", id, productId, quantity, "HELD", now);
+        reservationEvent("inventory.reserved", id, productId, quantity, "HELD", now, null);
         return new ReserveOutcome(findReservation(id), true);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void reserveForSaga(UUID orderId, String customerId, java.util.List<Requested> items, Instant now, Instant expiresAt) {
+        for (Requested item : items) {
+            String key = sagaKey(orderId, item.productId());
+            ReservationResponse existing = findByKey(key);
+            if (existing != null) {
+                reservationEvent("inventory.reserved", existing.id(), item.productId(), item.quantity(), "HELD", now, orderId);
+                continue;
+            }
+            int taken = jdbc.update("""
+                    UPDATE inventory_item
+                    SET available = available - ?, reserved = reserved + ?, updated_at = ?
+                    WHERE product_id = ? AND available >= ?
+                    """, item.quantity(), item.quantity(), Timestamp.from(now), item.productId(), item.quantity());
+            if (taken != 1) {
+                throw new StockShortException("Not enough stock is available.");
+            }
+            UUID id = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO stock_reservation (
+                        id, product_id, quantity, status, idempotency_key, request_hash,
+                        requester_id, expires_at, created_at, updated_at)
+                    VALUES (?, ?, ?, 'HELD', ?, ?, ?, ?, ?, ?)
+                    """, id, item.productId(), item.quantity(), key, sagaHash(item.productId(), item.quantity(), customerId),
+                    customerId, Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now));
+            movement(item.productId(), id, "RESERVE", item.quantity(), now);
+            reservationEvent("inventory.reserved", id, item.productId(), item.quantity(), "HELD", now, orderId);
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean commitForSaga(String customerId, UUID reservationId, Instant now) {
+        ReservationResponse current = findReservation(reservationId);
+        if (current == null) {
+            throw new StockShortException("Reservation was not found.");
+        }
+        if ("COMMITTED".equals(current.status())) {
+            return false;
+        }
+        int changed = jdbc.update("""
+                UPDATE stock_reservation
+                SET status = 'COMMITTED', updated_at = ?
+                WHERE id = ? AND status = 'HELD' AND expires_at > ?
+                """, Timestamp.from(now), reservationId, Timestamp.from(now));
+        if (changed != 1) {
+            throw new StockShortException("This reservation is no longer held.");
+        }
+        int reduced = jdbc.update("""
+                UPDATE inventory_item
+                SET reserved = reserved - ?, updated_at = ?
+                WHERE product_id = ? AND reserved >= ?
+                """, current.quantity(), Timestamp.from(now), current.productId(), current.quantity());
+        if (reduced != 1) {
+            throw new StockShortException("Reserved stock could not be committed.");
+        }
+        movement(current.productId(), reservationId, "COMMIT", current.quantity(), now);
+        reservationEvent("inventory.committed", reservationId, current.productId(), current.quantity(), "COMMITTED", now, null);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean releaseForSaga(UUID reservationId, Instant now) {
+        ReservationResponse current = findReservation(reservationId);
+        if (current == null || "RELEASED".equals(current.status()) || "EXPIRED".equals(current.status())) {
+            return false;
+        }
+        if ("COMMITTED".equals(current.status())) {
+            throw new StockShortException("A committed reservation cannot be released.");
+        }
+        int changed = jdbc.update("""
+                UPDATE stock_reservation
+                SET status = 'RELEASED', updated_at = ?
+                WHERE id = ? AND status = 'HELD'
+                """, Timestamp.from(now), reservationId);
+        if (changed != 1) {
+            return false;
+        }
+        returnStock(current.productId(), current.quantity(), now);
+        movement(current.productId(), reservationId, "RELEASE", current.quantity(), now);
+        reservationEvent("inventory.released", reservationId, current.productId(), current.quantity(), "RELEASED", now, null);
+        return true;
     }
 
     @Transactional(readOnly = true)
@@ -159,7 +242,7 @@ class InventoryTransactions {
         if (changed == 1) {
             returnStock(current.productId(), current.quantity(), now);
             movement(current.productId(), id, "RELEASE", current.quantity(), now);
-            reservationEvent("inventory.released", id, current.productId(), current.quantity(), "RELEASED", now);
+            reservationEvent("inventory.released", id, current.productId(), current.quantity(), "RELEASED", now, null);
             return findReservation(id).withoutSecrets();
         }
         ReservationResponse latest = findReservation(id);
@@ -193,7 +276,7 @@ class InventoryTransactions {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Reserved stock could not be committed.");
             }
             movement(current.productId(), id, "COMMIT", current.quantity(), now);
-            reservationEvent("inventory.committed", id, current.productId(), current.quantity(), "COMMITTED", now);
+            reservationEvent("inventory.committed", id, current.productId(), current.quantity(), "COMMITTED", now, null);
         }
         ReservationResponse latest = findReservation(id);
         if (!"COMMITTED".equals(latest.status())) {
@@ -265,11 +348,34 @@ class InventoryTransactions {
                 rs.getTimestamp("created_at").toInstant());
     }
 
-    private void reservationEvent(String eventType, UUID reservationId, UUID productId, int quantity, String status, Instant now) {
-        outbox.add(eventType, "inventory", reservationId.toString(), reservationId, java.util.Map.of(
-                "productId", productId.toString(),
-                "quantity", quantity,
-                "status", status), now);
+    private void reservationEvent(String eventType, UUID reservationId, UUID productId, int quantity, String status, Instant now, UUID orderId) {
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("productId", productId.toString());
+        payload.put("quantity", quantity);
+        payload.put("status", status);
+        UUID correlation = reservationId;
+        if (orderId != null) {
+            payload.put("orderId", orderId.toString());
+            correlation = orderId;
+        }
+        outbox.add(eventType, "inventory", reservationId.toString(), correlation, payload, now);
+    }
+
+    private static String sagaKey(UUID orderId, UUID productId) {
+        return "s" + orderId.toString().replace("-", "") + productId.toString().replace("-", "");
+    }
+
+    private static String sagaHash(UUID productId, int quantity, String customerId) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((productId + "|" + quantity + "|" + customerId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.", exception);
+        }
+    }
+
+    public record Requested(UUID productId, int quantity) {
     }
 
     private void movement(UUID productId, UUID reservationId, String type, int quantity, Instant now) {

@@ -14,5 +14,6 @@ public record OutboxMessage(
         UUID causationId,
         String payload,
         Instant occurredAt,
-        int retryCount) {
+        int retryCount,
+        String topic) {
 }

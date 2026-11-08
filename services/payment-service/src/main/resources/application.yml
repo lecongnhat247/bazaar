@@ -59,6 +59,7 @@ logging:
 bazaar:
   payment:
     events-topic: ${PAYMENT_EVENTS_TOPIC:bazaar.payment.events}
+    commands-topic: ${PAYMENT_COMMANDS_TOPIC:bazaar.payment.commands}
   security:
     jwt:
       remote: true
