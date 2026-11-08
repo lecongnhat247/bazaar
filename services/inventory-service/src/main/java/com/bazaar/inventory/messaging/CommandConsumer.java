@@ -79,15 +79,34 @@ public class CommandConsumer {
         for (JsonNode item : event.payload().get("items")) {
             items.add(new Requested(UUID.fromString(item.get("productId").asString()), item.get("quantity").asInt()));
         }
-        try {
-            transactions.reserveForSaga(orderId, customerId, items, now, now.plus(ttl));
-            metrics.reserved();
-        } catch (StockShortException exception) {
-            metrics.rejected();
-            outbox.add("inventory.reservation-failed", "inventory", orderId.toString(), orderId, java.util.Map.of(
-                    "orderId", orderId.toString(),
-                    "reason", exception.getMessage()), now);
+        int attempt = 0;
+        while (true) {
+            try {
+                transactions.reserveForSaga(orderId, customerId, items, now, now.plus(ttl));
+                metrics.reserved();
+                return;
+            } catch (StockShortException exception) {
+                metrics.rejected();
+                outbox.add("inventory.reservation-failed", "inventory", orderId.toString(), orderId, java.util.Map.of(
+                        "orderId", orderId.toString(),
+                        "reason", exception.getMessage()), now);
+                return;
+            } catch (RuntimeException exception) {
+                if (!deadlock(exception) || attempt == 2) {
+                    throw exception;
+                }
+                attempt++;
+            }
         }
+    }
+
+    private static boolean deadlock(Throwable exception) {
+        for (Throwable current = exception; current != null; current = current.getCause()) {
+            if (current instanceof java.sql.SQLException sql && "40P01".equals(sql.getSQLState())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void commit(EventEnvelope event, Instant now) {

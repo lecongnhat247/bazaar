@@ -32,6 +32,8 @@ Phase 4 M1 adds Prometheus and Grafana beside Compose. Java services expose Prom
 
 Phase 4 M2 records a small k6 baseline on this laptop. The report is [the M2 baseline](../performance/m2-baseline.md). It does not change checkout, the outbox, or inventory reservation, and it is not a capacity claim.
 
+Phase 4 M3 keeps stock reservation as one conditional update and records the lock chosen for each other path. A product edit now carries a version, and an order line can be found by reservation id. The notes are in [the M3 concurrency report](../performance/m3-concurrency.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

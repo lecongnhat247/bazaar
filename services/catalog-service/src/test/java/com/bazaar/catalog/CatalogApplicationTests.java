@@ -14,6 +14,11 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +30,9 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -65,6 +73,12 @@ class CatalogApplicationTests {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private jakarta.persistence.EntityManagerFactory entityManagerFactory;
+
+    @Autowired
+    private com.bazaar.catalog.api.CatalogExceptionHandler errors;
 
     @Autowired
     private OutboxPublisher outbox;
@@ -438,6 +452,66 @@ class CatalogApplicationTests {
                 WHERE event_id IN (SELECT event_id FROM outbox WHERE aggregate_id = ?)
                 """, Integer.class, aggregateId);
         return count == null ? 0 : count;
+    }
+
+    @Test
+    void concurrentProductEditsKeepOneVersion() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/products")
+                        .with(seller("seller-version"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(productJson("seller-version", "SKU-VERSION-1", "11.00")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID id = UUID.fromString(com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id"));
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch loaded = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger saved = new AtomicInteger();
+        AtomicInteger stale = new AtomicInteger();
+        for (int i = 0; i < 2; i++) {
+            int name = i;
+            pool.submit(() -> {
+                jakarta.persistence.EntityManager manager = entityManagerFactory.createEntityManager();
+                try {
+                    manager.getTransaction().begin();
+                    com.bazaar.catalog.product.Product product = manager.find(com.bazaar.catalog.product.Product.class, id);
+                    product.setName("Version " + name);
+                    loaded.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        manager.getTransaction().rollback();
+                        return;
+                    }
+                    manager.flush();
+                    manager.getTransaction().commit();
+                    saved.incrementAndGet();
+                } catch (RuntimeException | InterruptedException failure) {
+                    stale.incrementAndGet();
+                    if (manager.getTransaction().isActive()) {
+                        manager.getTransaction().rollback();
+                    }
+                    if (failure instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                } finally {
+                    manager.close();
+                }
+            });
+        }
+        assertThat(loaded.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        pool.shutdown();
+        assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+        Integer version = jdbc.queryForObject("SELECT version FROM product WHERE id = ?", Integer.class, id);
+        assertThat(saved.get()).isEqualTo(1);
+        assertThat(stale.get()).isEqualTo(1);
+        assertThat(version).isEqualTo(1);
+    }
+
+    @Test
+    void staleProductUpdateIsReportedAsAConflict() {
+        ResponseEntity<Map<String, String>> response = errors.stale(new OptimisticLockingFailureException("stale"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).containsEntry("error", "The product was changed by a concurrent update.");
     }
 
     private static String productJson(String sellerId, String sku, String price) {

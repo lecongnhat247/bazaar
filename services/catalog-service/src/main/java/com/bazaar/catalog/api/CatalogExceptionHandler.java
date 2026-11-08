@@ -3,6 +3,7 @@ package com.bazaar.catalog.api;
 import java.util.Map;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -26,6 +27,12 @@ public class CatalogExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<Map<String, String>> mismatch(MethodArgumentTypeMismatchException exception) {
         return ResponseEntity.badRequest().body(Map.of("error", exception.getName() + " is invalid"));
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> stale(OptimisticLockingFailureException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", "The product was changed by a concurrent update."));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

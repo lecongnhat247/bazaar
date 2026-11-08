@@ -138,7 +138,9 @@ public class InventoryTransactions {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reserveForSaga(UUID orderId, String customerId, java.util.List<Requested> items, Instant now, Instant expiresAt) {
-        for (Requested item : items) {
+        java.util.List<Requested> ordered = new java.util.ArrayList<>(items);
+        ordered.sort(java.util.Comparator.comparing(Requested::productId));
+        for (Requested item : ordered) {
             String key = sagaKey(orderId, item.productId());
             ReservationResponse existing = findByKey(key);
             if (existing != null) {

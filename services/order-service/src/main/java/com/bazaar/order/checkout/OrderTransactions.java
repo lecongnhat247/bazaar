@@ -3,8 +3,12 @@ package com.bazaar.order.checkout;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -135,16 +139,84 @@ class OrderTransactions {
     @Transactional(readOnly = true)
     public List<OrderResponse> list(OrderAccess access) {
         String sql = access.admin()
-                ? "SELECT id FROM customer_order ORDER BY created_at DESC LIMIT 20"
-                : "SELECT id FROM customer_order WHERE customer_id = ? ORDER BY created_at DESC LIMIT 20";
-        List<UUID> ids = access.admin()
-                ? jdbc.query(sql, (rs, row) -> rs.getObject("id", UUID.class))
-                : jdbc.query(sql, (rs, row) -> rs.getObject("id", UUID.class), access.subject());
+                ? """
+                SELECT id, customer_id, status, currency, total_amount, payment_id, created_at, updated_at
+                FROM customer_order
+                ORDER BY created_at DESC
+                LIMIT 20
+                """
+                : """
+                SELECT id, customer_id, status, currency, total_amount, payment_id, created_at, updated_at
+                FROM customer_order
+                WHERE customer_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+                """;
+        List<ListedOrder> rows = access.admin()
+                ? jdbc.query(sql, this::listed)
+                : jdbc.query(sql, this::listed, access.subject());
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        String marks = String.join(",", java.util.Collections.nCopies(rows.size(), "?"));
+        Object[] ids = rows.stream().map(ListedOrder::id).toArray();
+        Map<UUID, List<ItemResponse>> items = new HashMap<>();
+        jdbc.query("""
+                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id
+                FROM order_item
+                WHERE order_id IN (%s)
+                ORDER BY order_id, product_id
+                """.formatted(marks), (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    UUID orderId = rs.getObject("order_id", UUID.class);
+                    items.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(new ItemResponse(
+                            rs.getObject("product_id", UUID.class),
+                            rs.getString("seller_id"),
+                            rs.getString("sku"),
+                            rs.getString("product_name"),
+                            rs.getBigDecimal("unit_price"),
+                            rs.getInt("quantity"),
+                            rs.getBigDecimal("line_total"),
+                            rs.getObject("reservation_id", UUID.class)));
+                }, ids);
+        Map<UUID, List<HistoryResponse>> history = new HashMap<>();
+        jdbc.query("""
+                SELECT order_id, status, created_at
+                FROM order_status_history
+                WHERE order_id IN (%s)
+                ORDER BY order_id, seq
+                """.formatted(marks), (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    UUID orderId = rs.getObject("order_id", UUID.class);
+                    history.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(new HistoryResponse(
+                            rs.getString("status"),
+                            rs.getTimestamp("created_at").toInstant()));
+                }, ids);
         List<OrderResponse> orders = new ArrayList<>();
-        for (UUID id : ids) {
-            orders.add(response(required(id)));
+        for (ListedOrder row : rows) {
+            orders.add(new OrderResponse(
+                    row.id(),
+                    row.customerId(),
+                    row.status(),
+                    row.currency(),
+                    row.total(),
+                    row.paymentId(),
+                    items.getOrDefault(row.id(), List.of()),
+                    history.getOrDefault(row.id(), List.of()),
+                    row.createdAt(),
+                    row.updatedAt()));
         }
         return orders;
+    }
+
+    private ListedOrder listed(ResultSet rs, int row) throws SQLException {
+        return new ListedOrder(
+                rs.getObject("id", UUID.class),
+                rs.getString("customer_id"),
+                rs.getString("status"),
+                rs.getString("currency").trim(),
+                rs.getBigDecimal("total_amount"),
+                rs.getObject("payment_id", UUID.class),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant());
     }
 
     public OrderResponse response(OrderRow row) {
@@ -663,6 +735,17 @@ class OrderTransactions {
             BigDecimal lineTotal,
             UUID reservationId,
             String stockState) {
+    }
+
+    private record ListedOrder(
+            UUID id,
+            String customerId,
+            String status,
+            String currency,
+            BigDecimal total,
+            UUID paymentId,
+            Instant createdAt,
+            Instant updatedAt) {
     }
 
     record OrderRow(

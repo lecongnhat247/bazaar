@@ -21,6 +21,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -561,6 +563,106 @@ class OrderApplicationTests {
         } catch (RuntimeException exception) {
             throw exception;
         }
+    }
+
+    @Test
+    void concurrentDuplicateCheckoutCreatesOneOrder() throws Exception {
+        int threads = 6;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger replayed = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
+        for (int i = 0; i < threads; i++) {
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await(10, TimeUnit.SECONDS);
+                    int status = mockMvc.perform(post("/api/v1/orders/checkout")
+                                    .with(customer("buyer-dup"))
+                                    .header("Idempotency-Key", "order-key-dup-race")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(body(LAMP, 1, "SUCCESS")))
+                            .andReturn()
+                            .getResponse()
+                            .getStatus();
+                    if (status == 201) {
+                        created.incrementAndGet();
+                    } else if (status == 200) {
+                        replayed.incrementAndGet();
+                    } else {
+                        failed.incrementAndGet();
+                    }
+                } catch (Exception exception) {
+                    failed.incrementAndGet();
+                }
+            });
+        }
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        pool.shutdown();
+        assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+        Integer orders = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM customer_order WHERE idempotency_key = ?",
+                Integer.class,
+                "order-key-dup-race");
+        assertThat(orders).isEqualTo(1);
+        assertThat(created.get()).isEqualTo(1);
+        assertThat(replayed.get()).isEqualTo(threads - 1);
+        assertThat(failed.get()).isZero();
+    }
+
+    @Test
+    void concurrentCancelKeepsOneStatusHistory() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-cancel-race"))
+                        .header("Idempotency-Key", "order-key-cancel-race")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger ok = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
+        for (int i = 0; i < 2; i++) {
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await(10, TimeUnit.SECONDS);
+                    int status = mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-cancel-race")))
+                            .andReturn()
+                            .getResponse()
+                            .getStatus();
+                    if (status == 200) {
+                        ok.incrementAndGet();
+                    } else {
+                        failed.incrementAndGet();
+                    }
+                } catch (Exception exception) {
+                    failed.incrementAndGet();
+                }
+            });
+        }
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        pool.shutdown();
+        assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+        String orderStatus = jdbc.queryForObject(
+                "SELECT status FROM customer_order WHERE id = ?",
+                String.class,
+                UUID.fromString(id));
+        Integer duplicateSeq = jdbc.queryForObject("""
+                SELECT COUNT(*) - COUNT(DISTINCT seq)
+                FROM order_status_history
+                WHERE order_id = ?
+                """, Integer.class, UUID.fromString(id));
+        assertThat(orderStatus).isEqualTo("CANCELLED");
+        assertThat(duplicateSeq).isZero();
+        assertThat(ok.get() + failed.get()).isEqualTo(2);
     }
 
     @Test
