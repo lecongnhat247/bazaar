@@ -42,6 +42,8 @@ Phase 4 M6 keeps the same Helm chart and adds the notification workload, autosca
 
 Phase 4 M7 scans dependencies and images in GitHub Actions, publishes an immutable commit tag, and keeps cluster deploy on a manual workflow. Rollback names a Helm revision. The steps are in [Release](../deployment/release.md).
 
+Phase 4 M8 stops one Compose service at a time and runs one small flash sale. Checkout does not create an order while catalog is down. A checkout accepted while Kafka is down is confirmed after the broker returns, and the same key does not pay twice. The notes are in [the M8 chaos report](../performance/m8-chaos.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

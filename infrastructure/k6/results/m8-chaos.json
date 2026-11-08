@@ -1,0 +1,104 @@
+{
+  "at": "2026-11-08T12:01:11.314Z",
+  "report": [
+    {
+      "name": "snapshot",
+      "orders": 55,
+      "lamp": {
+        "available": 1,
+        "reserved": 0
+      },
+      "shirt": {
+        "available": 2,
+        "reserved": 0
+      }
+    },
+    {
+      "name": "notification-auth",
+      "anonymous": 401,
+      "customer": 200
+    },
+    {
+      "name": "catalog-stopped",
+      "checkout": 503,
+      "ms": 2234,
+      "body": "{\"error\":\"Checkout could not be completed. Retry with the same Idempotency-Key.\"}",
+      "ordersBefore": 55,
+      "ordersAfter": 55
+    },
+    {
+      "name": "order-stopped",
+      "checkout": 500,
+      "ms": 322,
+      "body": "{\"timestamp\":\"2026-11-08T11:59:58.019Z\",\"path\":\"/api/v1/orders/checkout\",\"status\":500,\"error\":\"Internal Server Error\",\"requestId\":\"d44ebe77-501\"}"
+    },
+    {
+      "name": "redis-stopped",
+      "product": 200,
+      "ms": 803
+    },
+    {
+      "name": "kafka-stopped",
+      "checkout": 201,
+      "ms": 722,
+      "statusAfterRecovery": "CONFIRMED",
+      "replay": 200,
+      "orderRows": 1,
+      "succeededPayments": 1,
+      "unpublishedOutbox": 0,
+      "stock": {
+        "available": 3,
+        "reserved": 0
+      }
+    },
+    {
+      "name": "consumer-lag",
+      "sample": [
+        "catalog-service bazaar.catalog.events 1          1               1               0               catalog-service-0-1aa5112c-c4f6-416e-b383-d3a4ee927d39 /172.19.0.13    catalog-service-0",
+        "catalog-service bazaar.catalog.events 2          1               1               0               catalog-service-0-1aa5112c-c4f6-416e-b383-d3a4ee927d39 /172.19.0.13    catalog-service-0",
+        "catalog-service bazaar.catalog.events 0          -               0               -               catalog-service-0-1aa5112c-c4f6-416e-b383-d3a4ee927d39 /172.19.0.13    catalog-service-0",
+        "inventory-commands bazaar.inventory.commands 0          26              26              0               inventory-service-0-5dafbc9d-214b-4064-9e97-dc87dc6500a0 /172.19.0.14    inventory-service-0",
+        "inventory-commands bazaar.inventory.commands 2          37              37              0               inventory-service-0-5dafbc9d-214b-4064-9e97-dc87dc6500a0 /172.19.0.14    inventory-service-0",
+        "inventory-commands bazaar.inventory.commands 1          30              30              0               inventory-service-0-5dafbc9d-214b-4064-9e97-dc87dc6500a0 /172.19.0.14    inventory-service-0",
+        "inventory-service bazaar.inventory.events 0          30              30              0               inventory-service-0-ba0bcfdb-180b-4386-b392-9cd0accbbaa8 /172.19.0.14    inventory-service-0",
+        "inventory-service bazaar.inventory.events 1          31              31              0               inventory-service-0-ba0bcfdb-180b-4386-b392-9cd0accbbaa8 /172.19.0.14    inventory-service-0"
+      ]
+    },
+    {
+      "name": "resources",
+      "containers": [
+        "bazaar-api-gateway-1 294.2MiB / 512MiB 9.02%",
+        "bazaar-order-service-1 318.7MiB / 512MiB 3.57%",
+        "bazaar-inventory-service-1 333.2MiB / 512MiB 3.25%",
+        "bazaar-keycloak-1 565.6MiB / 768MiB 0.18%",
+        "bazaar-postgres-1 150.1MiB / 512MiB 3.67%",
+        "bazaar-catalog-service-1 346.4MiB / 512MiB 2.06%",
+        "bazaar-payment-service-1 329.6MiB / 512MiB 9.60%",
+        "bazaar-identity-service-1 295.1MiB / 512MiB 0.09%",
+        "bazaar-storefront-1 54.66MiB / 384MiB 0.00%",
+        "bazaar-grafana-1 121.8MiB / 192MiB 0.30%",
+        "bazaar-notification-service-1 78.93MiB / 384MiB 27.05%",
+        "bazaar-postgres-exporter-1 22.4MiB / 64MiB 0.00%",
+        "bazaar-prometheus-1 96.05MiB / 192MiB 0.17%",
+        "bazaar-kafka-exporter-1 23.93MiB / 64MiB 0.00%",
+        "bazaar-redis-exporter-1 15.95MiB / 48MiB 0.00%",
+        "bazaar-redis-1 5.91MiB / 128MiB 0.22%",
+        "bazaar-kafka-1 464.4MiB / 768MiB 163.38%"
+      ]
+    },
+    {
+      "name": "postgres-stopped",
+      "productWhileDown": 504,
+      "ms": 5056,
+      "productAfter": 504,
+      "lamp": {
+        "available": 1,
+        "reserved": 0
+      },
+      "shirt": {
+        "available": 2,
+        "reserved": 0
+      }
+    }
+  ]
+}
