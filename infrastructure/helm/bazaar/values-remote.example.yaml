@@ -12,4 +12,61 @@ image:
 imagePullSecrets:
   - name: ghcr-pull
 
+# Name of a Secret created in the cluster. Do not put database passwords in this file.
 envFromSecret: ""
+
+# Gateway and storefront may follow CPU. Database services use 10 Hikari connections per pod.
+# Six of them at two replicas is 120 connections, above a default Postgres limit of 100.
+# Kafka topics have 3 partitions, so consumer replicas above 3 do not take more work.
+# cpu: false freezes the replica count. Raise maxReplicas only with a connection budget.
+autoscaling:
+  enabled: true
+  targetCPUUtilizationPercentage: 70
+
+applications:
+  api-gateway:
+    scale:
+      minReplicas: 2
+      maxReplicas: 4
+      cpu: true
+  storefront:
+    scale:
+      minReplicas: 2
+      maxReplicas: 4
+      cpu: true
+  identity-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 2
+      cpu: true
+  catalog-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      cpu: false
+  inventory-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      cpu: false
+  order-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      cpu: false
+  payment-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      cpu: false
+  notification-service:
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      cpu: false
+
+# Turn ingress on only after an ingress controller exists. The chart does not install one.
+ingress:
+  enabled: false
+  className: ""
+  host: shop.example.com

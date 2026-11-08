@@ -10,9 +10,11 @@ EKS, AKS, GKE, and a cluster on a virtual machine are examples of distributions 
 - Helm 4.3.x, the version used to lint and install the chart.
 - Permission to create a namespace, Deployments, Services, and a ConfigMap.
 - A way for the nodes to pull from `ghcr.io`.
-- Enough memory for seven containers. The chart requests 256Mi for each Java service and 128Mi for the storefront. Limits are 512Mi and 384Mi.
+- Enough memory for eight application containers. The chart requests 256Mi for each Java service and 128Mi for the storefront and the notification service. Limits are 512Mi and 384Mi.
+- PostgreSQL, Kafka, Redis, and Keycloak reachable from the pods. The chart does not deploy them. Put their addresses in a Secret and set `envFromSecret` to that Secret's name.
+- A metrics-server if the CPU autoscalers should read usage. Without it they stay at the minimum replica count.
 
-The chart does not install an ingress controller, a certificate manager, or a storage class. Host access on kind is `kubectl port-forward`. A remote cluster can keep that path. Putting a load balancer or ingress in front of the Services is later work and is not part of this chart.
+The chart can render an Ingress when `ingress.enabled` is true and `ingress.host` is set. It does not install an ingress controller, a certificate manager, or a storage class. Host access on kind is `kubectl port-forward`. A remote cluster can keep that path.
 
 ## Images
 
@@ -27,7 +29,9 @@ helm upgrade --install bazaar infrastructure/helm/bazaar \
 
 `image.registry` is `ghcr.io/<owner>` and `image.tag` is the published tag. `image.pullPolicy` stays `IfNotPresent` for a cluster that already has the image, or becomes `Always` when every start must check the registry. Both are values. Neither is written into the image.
 
-Service DNS names stay `api-gateway`, `identity-service`, `catalog-service`, `inventory-service`, `order-service`, `payment-service`, and `storefront`. The gateway and the storefront read those addresses from ConfigMap `bazaar-config`. A remote cluster does not need laptop host names or node IP addresses.
+Service DNS names stay `api-gateway`, `identity-service`, `catalog-service`, `inventory-service`, `order-service`, `payment-service`, `notification-service`, and `storefront`. The gateway and the storefront read those addresses from ConfigMap `bazaar-config`. A remote cluster does not need laptop host names or node IP addresses.
+
+The example values raise the gateway and the storefront to a minimum of 2, which also creates a PodDisruptionBudget for those two. Database-backed services stay at one replica unless the Postgres connection budget allows more. Hikari opens at most 10 connections per pod. Kafka topics have 3 partitions, and the example keeps consumer scale-up disabled.
 
 ## Pull secret
 

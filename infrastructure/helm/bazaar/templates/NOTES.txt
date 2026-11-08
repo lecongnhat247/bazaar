@@ -7,4 +7,4 @@ Forward the storefront and the gateway from WSL:
 
 Then open http://localhost:3000 and http://localhost:8080/actuator/health.
 
-Image pull secrets and runtime secrets are not created by this chart. Set imagePullSecrets or envFromSecret to the name of a Secret that already exists in the namespace.
+Image pull secrets and runtime secrets are not created by this chart. Set imagePullSecrets or envFromSecret to the name of a Secret that already exists in the namespace. Java readiness includes the database. Notification readiness includes its database. Neither URL is stored in this chart. PostgreSQL, Kafka, Redis, and Keycloak stay outside the namespace.

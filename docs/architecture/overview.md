@@ -38,6 +38,8 @@ Phase 4 M4 adds a campaign quota beside warehouse stock in the inventory service
 
 Phase 4 M5 bounds the checkout price lookup. A catalog or inventory failure returns 503 and does not create an order. Reads may be tried twice. Writes, the saga, and the outbox keep their own retry. The notes are in [the M5 resilience report](../performance/m5-resilience.md).
 
+Phase 4 M6 keeps the same Helm chart and adds the notification workload, autoscaling bounds, a disruption budget for two or more replicas, and an ingress template that stays off. PostgreSQL, Kafka, Redis, and Keycloak remain outside the cluster. The steps are in [kind and Helm](../deployment/kubernetes-kind.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

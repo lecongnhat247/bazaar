@@ -9,6 +9,7 @@ images=(
   bazaar-order-service:latest
   bazaar-payment-service:latest
   bazaar-storefront:latest
+  bazaar-notification-service:latest
 )
 
 for image in "${images[@]}"; do

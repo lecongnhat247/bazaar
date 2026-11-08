@@ -6,7 +6,7 @@ Phase 1 has three deployment targets. They share images and environment variable
 | --- | --- | --- |
 | Local processes | M2 and M3 | Fast edit and test on the host JDK and Node.js |
 | Docker Compose | M4 | Run the packaged images on one Docker network |
-| kind | M5 | Run the Helm chart on local Kubernetes |
+| kind | M5, extended in Phase 4 M6 | Run the Helm chart on local Kubernetes |
 | Remote Kubernetes | Documented in M6, not provisioned | Same chart, different image values |
 
 Compose steps are in [docker-compose.md](docker-compose.md). kind steps are in [kubernetes-kind.md](kubernetes-kind.md). Remote Kubernetes steps are in [remote-kubernetes.md](remote-kubernetes.md). The design they follow is [deployment architecture](../architecture/deployment-architecture.md). The decision record is [ADR-004](../adr/ADR-004-docker-and-kubernetes.md).

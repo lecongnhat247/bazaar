@@ -1,6 +1,6 @@
 apiVersion: v2
 name: bazaar
-description: Phase 1 skeleton for the BAZAAR marketplace
+description: BAZAAR application chart. PostgreSQL, Kafka, Redis, and Keycloak stay outside the cluster.
 type: application
 version: 0.1.0
 appVersion: 0.1.0-SNAPSHOT

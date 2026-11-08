@@ -106,6 +106,7 @@ flowchart TB
     inventory[Deployment inventory-service]
     orders[Deployment order-service]
     payments[Deployment payment-service]
+    notify[Deployment notification-service]
 
     svcFront[Service storefront ClusterIP :3000]
     svcGw[Service api-gateway ClusterIP :8080]
@@ -114,6 +115,7 @@ flowchart TB
     svcInv[Service inventory-service ClusterIP :8080]
     svcOrd[Service order-service ClusterIP :8080]
     svcPay[Service payment-service ClusterIP :8080]
+    svcNotify[Service notification-service ClusterIP :8080]
   end
 
   browser --> portForward
@@ -126,6 +128,7 @@ flowchart TB
   gateway --> svcInv --> inventory
   gateway --> svcOrd --> orders
   gateway --> svcPay --> payments
+  svcFront --> svcNotify --> notify
 ```
 
 Cluster and chart requirements:
@@ -135,15 +138,18 @@ Cluster and chart requirements:
 - Namespace `bazaar`.
 - One Deployment and one ClusterIP Service per application.
 - ConfigMap for the URLs above. Secret references only if a later value is sensitive. Phase 1 commits no real credentials.
-- Readiness probe: `/actuator/health/readiness` for Java, `/` for the storefront.
-- Liveness probe: `/actuator/health/liveness` for Java, `/` for the storefront.
-- Startup probe on the Java deployments so a slow JVM start is not treated as a deadlock.
+- Readiness probe: `/actuator/health/readiness` for Java, `/health/ready` for notification, `/` for the storefront.
+- Liveness probe: `/actuator/health/liveness` for Java, `/health` for notification, `/` for the storefront.
+- Startup probe on the Java deployments and on notification, so a slow start is not treated as a deadlock.
 - CPU and memory requests and limits. Starting point: Java requests `100m` / `256Mi` and limits `500m` / `512Mi`; storefront requests `50m` / `128Mi` and limits `300m` / `384Mi`.
 - Java heap stays inside the limit with `MaxRAMPercentage`.
 - `terminationGracePeriodSeconds` aligned with Spring `server.shutdown=graceful`.
 - Rolling update with a configurable image repository and tag.
 - Local kind uses `IfNotPresent` after `kind load docker-image`. A remote cluster uses a GHCR repository and `IfNotPresent` or `Always` through values.
-- Host access is `kubectl port-forward` to the storefront and the gateway. Phase 1 does not install an ingress controller.
+- One HorizontalPodAutoscaler per Deployment. Local minimum and maximum are 1. Only the gateway and the storefront follow CPU. Database services and Kafka consumers do not scale up on CPU.
+- A PodDisruptionBudget appears only when the minimum replica count is at least 2.
+- Ingress is rendered only when enabled. The chart does not install an ingress controller.
+- Host access is `kubectl port-forward` to the storefront and the gateway.
 - No hostPath, node IP, or laptop path in the manifests.
 
 Image names:
@@ -156,6 +162,7 @@ Image names:
 | Inventory | `bazaar-inventory-service` |
 | Order | `bazaar-order-service` |
 | Payment | `bazaar-payment-service` |
+| Notification | `bazaar-notification-service` |
 | Storefront | `bazaar-storefront` |
 
 Remote names follow `ghcr.io/<owner>/bazaar-<application>:<tag>`. The owner and tag are Helm values.

@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 if [[ -n "$(docker compose -f "$root/docker-compose.yml" ps -q)" ]]; then
-  echo "Stop Docker Compose before creating the kind cluster: docker compose down" >&2
+  echo "Stop Docker Compose before creating the kind cluster: docker compose stop" >&2
   exit 1
 fi
 
