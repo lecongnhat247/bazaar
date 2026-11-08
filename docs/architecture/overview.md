@@ -36,6 +36,8 @@ Phase 4 M3 keeps stock reservation as one conditional update and records the loc
 
 Phase 4 M4 adds a campaign quota beside warehouse stock in the inventory service. Checkout prices the order from the campaign and sends the campaign id on the existing reservation command. Postgres is the only component that can accept the sale. The notes are in [the M4 flash sale report](../performance/m4-flash-sale.md).
 
+Phase 4 M5 bounds the checkout price lookup. A catalog or inventory failure returns 503 and does not create an order. Reads may be tried twice. Writes, the saga, and the outbox keep their own retry. The notes are in [the M5 resilience report](../performance/m5-resilience.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

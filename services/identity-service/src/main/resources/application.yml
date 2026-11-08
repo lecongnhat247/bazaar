@@ -7,6 +7,9 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/identity_db}
     username: ${DB_USERNAME:identity_user}
     password: ${DB_PASSWORD:identity_local}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 2000
   jpa:
     open-in-view: false
     hibernate:

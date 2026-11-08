@@ -52,6 +52,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.bazaar.order.checkout.CheckoutResilience;
 import com.bazaar.order.checkout.SagaCoordinator;
 import com.bazaar.order.messaging.EventEnvelope;
 import com.bazaar.order.messaging.OrderEventConsumer;
@@ -79,6 +80,9 @@ class OrderApplicationTests {
     private static final AtomicInteger COMMITS = new AtomicInteger();
     private static final AtomicInteger RELEASES = new AtomicInteger();
     private static volatile String fault = "NONE";
+    private static final AtomicInteger CATALOG_CALLS = new AtomicInteger();
+    private static final AtomicInteger SLOW_IN_FLIGHT = new AtomicInteger();
+    private static final AtomicInteger SLOW_PEAK = new AtomicInteger();
     private static final HttpServer DOWNSTREAM = startDownstream();
     private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.1");
 
@@ -112,6 +116,9 @@ class OrderApplicationTests {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private CheckoutResilience resilience;
+
     @DynamicPropertySource
     static void downstream(DynamicPropertyRegistry registry) {
         String base = "http://127.0.0.1:" + DOWNSTREAM.getAddress().getPort();
@@ -128,6 +135,10 @@ class OrderApplicationTests {
         RESERVES.set(0);
         COMMITS.set(0);
         RELEASES.set(0);
+        CATALOG_CALLS.set(0);
+        SLOW_IN_FLIGHT.set(0);
+        SLOW_PEAK.set(0);
+        resilience.reset();
     }
 
     @Test
@@ -195,6 +206,100 @@ class OrderApplicationTests {
                 .andExpect(status().isServiceUnavailable());
         Integer after = jdbc.queryForObject("SELECT COUNT(*) FROM outbox", Integer.class);
         assertThat(after).isEqualTo(before);
+    }
+
+    @Test
+    void catalogOutageOpensTheCircuitAndWritesNoOrder() throws Exception {
+        fault = "CATALOG";
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order", Integer.class);
+        for (int attempt = 0; attempt < 8; attempt++) {
+            mockMvc.perform(post("/api/v1/orders/checkout")
+                            .with(customer("buyer-circuit"))
+                            .header("Idempotency-Key", "order-key-circuit-" + attempt)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(LAMP, 1, "SUCCESS")))
+                    .andExpect(status().isServiceUnavailable());
+        }
+        Integer after = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order", Integer.class);
+        assertThat(after).isEqualTo(before);
+        assertThat(CATALOG_CALLS.get()).isBetween(5, 12);
+    }
+
+    @Test
+    void missingProductIsNotRetried() throws Exception {
+        fault = "MISSING";
+        for (int attempt = 0; attempt < 6; attempt++) {
+            mockMvc.perform(post("/api/v1/orders/checkout")
+                            .with(customer("buyer-missing"))
+                            .header("Idempotency-Key", "order-key-missing-" + attempt)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(LAMP, 1, "SUCCESS")))
+                    .andExpect(status().isConflict());
+        }
+        assertThat(CATALOG_CALLS.get()).isEqualTo(6);
+        fault = "NONE";
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-missing"))
+                        .header("Idempotency-Key", "order-key-missing-ok")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void inventoryOutageRejectsTheCampaignCheckout() throws Exception {
+        fault = "INVENTORY";
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order", Integer.class);
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-inventory-down"))
+                        .header("Idempotency-Key", "order-key-inventory-down")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS", UUID.fromString("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d2001"))))
+                .andExpect(status().isServiceUnavailable());
+        Integer after = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order", Integer.class);
+        assertThat(after).isEqualTo(before);
+    }
+
+    @Test
+    void downstreamBulkheadCapsConcurrentCatalogCalls() throws Exception {
+        fault = "SLOW";
+        int threads = 12;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threads);
+        AtomicInteger unavailable = new AtomicInteger();
+        for (int attempt = 0; attempt < threads; attempt++) {
+            String key = "order-key-bulk-" + attempt;
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await(5, TimeUnit.SECONDS);
+                    int code = mockMvc.perform(post("/api/v1/orders/checkout")
+                                    .with(customer("buyer-bulk"))
+                                    .header("Idempotency-Key", key)
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(body(LAMP, 1, "SUCCESS")))
+                            .andReturn()
+                            .getResponse()
+                            .getStatus();
+                    if (code == 503) {
+                        unavailable.incrementAndGet();
+                    }
+                } catch (Exception exception) {
+                    unavailable.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        assertThat(done.await(20, TimeUnit.SECONDS)).isTrue();
+        pool.shutdown();
+        assertThat(unavailable.get()).isEqualTo(threads);
+        assertThat(SLOW_PEAK.get()).isBetween(1, 8);
+        assertThat(CATALOG_CALLS.get()).isLessThanOrEqualTo(8);
     }
 
     private void waitUntilProcessed(String orderId, int expected) throws InterruptedException {
@@ -755,6 +860,7 @@ class OrderApplicationTests {
     private static HttpServer startDownstream() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.setExecutor(Executors.newCachedThreadPool());
             server.createContext("/", OrderApplicationTests::handle);
             server.start();
             return server;
@@ -768,15 +874,35 @@ class OrderApplicationTests {
         String method = exchange.getRequestMethod();
         String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         if ("GET".equals(method) && path.startsWith("/api/v1/inventory/campaigns/")) {
+            if ("INVENTORY".equals(fault)) {
+                send(exchange, 503, "{\"error\":\"down\"}");
+                return;
+            }
             String id = path.substring(path.lastIndexOf('/') + 1);
             send(exchange, 200, "{\"id\":\"" + id + "\",\"productId\":\"" + LAMP
                     + "\",\"price\":9.00,\"currency\":\"USD\",\"status\":\"ACTIVE\",\"remaining\":10,\"perCustomerLimit\":2}");
             return;
         }
         if ("GET".equals(method) && path.startsWith("/api/v1/products/")) {
+            CATALOG_CALLS.incrementAndGet();
             if ("CATALOG".equals(fault)) {
                 send(exchange, 500, "{\"error\":\"down\"}");
                 return;
+            }
+            if ("MISSING".equals(fault)) {
+                send(exchange, 404, "{\"error\":\"missing\"}");
+                return;
+            }
+            if ("SLOW".equals(fault)) {
+                int inFlight = SLOW_IN_FLIGHT.incrementAndGet();
+                SLOW_PEAK.accumulateAndGet(inFlight, Math::max);
+                try {
+                    Thread.sleep(1500);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    SLOW_IN_FLIGHT.decrementAndGet();
+                }
             }
             UUID id = UUID.fromString(path.substring(path.lastIndexOf('/') + 1));
             String name = SHIRT.equals(id) ? "Shirt" : "Desk lamp";

@@ -7,6 +7,7 @@ import { JsonLogger } from "./log";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger: new JsonLogger() });
+  app.enableShutdownHooks();
   const origin = (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",");
   app.enableCors({ origin, credentials: true });
   await app.listen(process.env.PORT ?? 8080);

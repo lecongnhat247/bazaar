@@ -57,6 +57,7 @@ export class KafkaConsumer implements OnApplicationBootstrap, OnApplicationShutd
         this.lagTimer = setInterval(() => void this.logLag(), 30_000);
         this.log.log("Kafka consumer started.");
         await consumer.run({
+          partitionsConsumedConcurrently: 1,
           eachMessage: async ({ topic, partition, message }) => {
             if (!message.value) {
               return;

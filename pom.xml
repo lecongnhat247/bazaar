@@ -30,6 +30,7 @@
   <properties>
     <java.version>25</java.version>
     <spring-cloud.version>2025.1.4</spring-cloud.version>
+    <resilience4j.version>2.3.0</resilience4j.version>
     <!-- The aggregator has no main class. Service modules set this back to false. -->
     <spring-boot.run.skip>true</spring-boot.run.skip>
   </properties>
@@ -40,6 +41,13 @@
         <groupId>org.springframework.cloud</groupId>
         <artifactId>spring-cloud-dependencies</artifactId>
         <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-bom</artifactId>
+        <version>${resilience4j.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

@@ -23,19 +23,24 @@ class DownstreamClient {
     private final RestClient catalog;
     private final RestClient inventory;
     private final RestClient payment;
+    private final CheckoutResilience resilience;
 
     DownstreamClient(
             ObjectProvider<RestClient.Builder> builders,
+            CheckoutResilience resilience,
             @Value("${bazaar.order.catalog-url}") String catalogUrl,
             @Value("${bazaar.order.inventory-url}") String inventoryUrl,
-            @Value("${bazaar.order.payment-url}") String paymentUrl) {
-        this.catalog = client(builders, catalogUrl);
-        this.inventory = client(builders, inventoryUrl);
-        this.payment = client(builders, paymentUrl);
+            @Value("${bazaar.order.payment-url}") String paymentUrl,
+            @Value("${bazaar.order.resilience.connect-timeout:300ms}") Duration connectTimeout,
+            @Value("${bazaar.order.resilience.read-timeout:800ms}") Duration readTimeout) {
+        this.resilience = resilience;
+        this.catalog = client(builders, catalogUrl, connectTimeout, readTimeout);
+        this.inventory = client(builders, inventoryUrl, connectTimeout, readTimeout);
+        this.payment = client(builders, paymentUrl, connectTimeout, readTimeout);
     }
 
     CampaignQuote campaign(UUID id) {
-        return call(() -> inventory.get()
+        return read("inventory", () -> inventory.get()
                 .uri("/api/v1/inventory/campaigns/{id}", id)
                 .headers(this::forwardContext)
                 .retrieve()
@@ -43,7 +48,7 @@ class DownstreamClient {
     }
 
     CatalogProduct product(UUID id) {
-        return call(() -> catalog.get()
+        return read("catalog", () -> catalog.get()
                 .uri("/api/v1/products/{id}", id)
                 .header("Bazaar-Read-Source", "database")
                 .headers(this::forwardContext)
@@ -52,7 +57,7 @@ class DownstreamClient {
     }
 
     StockHold reserve(String key, UUID productId, int quantity) {
-        return call(() -> inventory.post()
+        return write("inventory", () -> inventory.post()
                 .uri("/api/v1/inventory/reservations")
                 .header("Idempotency-Key", key)
                 .headers(this::forwardContext)
@@ -62,7 +67,7 @@ class DownstreamClient {
     }
 
     void commit(UUID reservationId) {
-        call(() -> inventory.post()
+        write("inventory", () -> inventory.post()
                 .uri("/api/v1/inventory/reservations/{id}/commit", reservationId)
                 .headers(this::forwardContext)
                 .retrieve()
@@ -70,7 +75,7 @@ class DownstreamClient {
     }
 
     void release(UUID reservationId) {
-        call(() -> inventory.post()
+        write("inventory", () -> inventory.post()
                 .uri("/api/v1/inventory/reservations/{id}/release", reservationId)
                 .headers(this::forwardContext)
                 .retrieve()
@@ -78,7 +83,7 @@ class DownstreamClient {
     }
 
     PaymentState createPayment(String key, UUID orderId, BigDecimal amount, String currency) {
-        return call(() -> payment.post()
+        return write("payment", () -> payment.post()
                 .uri("/api/v1/payments")
                 .header("Idempotency-Key", key)
                 .headers(this::forwardContext)
@@ -89,7 +94,7 @@ class DownstreamClient {
 
     PaymentState simulate(UUID paymentId, String outcome) {
         String action = "SUCCESS".equals(outcome) ? "simulate-success" : "simulate-failure";
-        return call(() -> payment.post()
+        return write("payment", () -> payment.post()
                 .uri("/api/v1/payments/{id}/{action}", paymentId, action)
                 .headers(this::forwardContext)
                 .retrieve()
@@ -97,7 +102,7 @@ class DownstreamClient {
     }
 
     void cancelPayment(UUID paymentId) {
-        call(() -> payment.post()
+        write("payment", () -> payment.post()
                 .uri("/api/v1/payments/{id}/cancel", paymentId)
                 .headers(this::forwardContext)
                 .retrieve()
@@ -123,14 +128,26 @@ class DownstreamClient {
         }
     }
 
-    private static RestClient client(ObjectProvider<RestClient.Builder> builders, String baseUrl) {
+    private static RestClient client(
+            ObjectProvider<RestClient.Builder> builders,
+            String baseUrl,
+            Duration connectTimeout,
+            Duration readTimeout) {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
-        factory.setReadTimeout(Duration.ofSeconds(5));
+                HttpClient.newBuilder().connectTimeout(connectTimeout).build());
+        factory.setReadTimeout(readTimeout);
         return builders.getObject().baseUrl(baseUrl).requestFactory(factory).build();
     }
 
-    private static <T> T call(Remote<T> remote) {
+    private <T> T read(String dependency, Remote<T> remote) {
+        return resilience.protectRead(dependency, () -> invoke(remote));
+    }
+
+    private <T> T write(String dependency, Remote<T> remote) {
+        return resilience.protectWrite(dependency, () -> invoke(remote));
+    }
+
+    private static <T> T invoke(Remote<T> remote) {
         try {
             return remote.get();
         } catch (RestClientResponseException exception) {

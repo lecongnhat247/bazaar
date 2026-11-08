@@ -7,6 +7,9 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/order_db}
     username: ${DB_USERNAME:order_user}
     password: ${DB_PASSWORD:order_local}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 2000
   jpa:
     open-in-view: false
     hibernate:
@@ -25,6 +28,7 @@ spring:
     consumer:
       group-id: order-service
       auto-offset-reset: earliest
+      max-poll-records: 20
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     template:
@@ -33,6 +37,7 @@ spring:
       auto-startup: false
       missing-topics-fatal: false
       observation-enabled: true
+      shutdown-timeout: 10s
     admin:
       fail-fast: false
 
@@ -83,6 +88,17 @@ bazaar:
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
     inventory-url: ${INVENTORY_SERVICE_URL:http://localhost:8083}
     payment-url: ${PAYMENT_SERVICE_URL:http://localhost:8085}
+    resilience:
+      connect-timeout: ${ORDER_CONNECT_TIMEOUT:300ms}
+      read-timeout: ${ORDER_READ_TIMEOUT:800ms}
+      retry-attempts: ${ORDER_READ_RETRY_ATTEMPTS:2}
+      retry-wait: ${ORDER_READ_RETRY_WAIT:20ms}
+      bulkhead-concurrent: ${ORDER_DOWNSTREAM_CONCURRENCY:8}
+      rate-limit-per-second: ${ORDER_DOWNSTREAM_RATE:30}
+      circuit-window: 10
+      circuit-minimum: 5
+      circuit-failure-rate: 50
+      circuit-open: 10s
     events-topic: ${ORDER_EVENTS_TOPIC:bazaar.order.events}
     inventory-events-topic: ${INVENTORY_EVENTS_TOPIC:bazaar.inventory.events}
     payment-events-topic: ${PAYMENT_EVENTS_TOPIC:bazaar.payment.events}
