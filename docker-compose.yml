@@ -236,9 +236,59 @@ services:
       API_GATEWAY_URL: http://api-gateway:8080
       KEYCLOAK_PUBLIC_URL: http://localhost:8088
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      NOTIFICATION_URL: http://notification-service:8080
+      NOTIFICATION_PUBLIC_URL: http://localhost:8086
     depends_on:
       api-gateway:
         condition: service_healthy
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  notification-db-init:
+    image: postgres:17.11-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: bazaar_local
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if ! psql -h postgres -U bazaar -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='notification_user'" | grep -q 1; then
+          psql -h postgres -U bazaar -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE notification_user LOGIN PASSWORD 'notification_local'"
+        fi
+        if ! psql -h postgres -U bazaar -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='notification_db'" | grep -q 1; then
+          psql -h postgres -U bazaar -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE notification_db OWNER notification_user"
+        fi
+    mem_limit: 128m
+    restart: "no"
+    networks:
+      - bazaar
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    image: bazaar-notification-service
+    ports:
+      - "8086:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://notification_user:notification_local@postgres:5432/notification_db
+      KAFKA_BROKERS: kafka:19092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KEYCLOAK_ISSUER: http://localhost:8088/realms/bazaar
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
+      CORS_ORIGIN: http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notification-db-init:
+        condition: service_completed_successfully
     mem_limit: 384m
     restart: unless-stopped
     networks:

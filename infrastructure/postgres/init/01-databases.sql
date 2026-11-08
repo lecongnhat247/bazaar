@@ -20,3 +20,6 @@ CREATE DATABASE payment_db OWNER payment_user;
 
 CREATE USER keycloak_user WITH PASSWORD 'keycloak_local';
 CREATE DATABASE keycloak_db OWNER keycloak_user;
+
+CREATE USER notification_user WITH PASSWORD 'notification_local';
+CREATE DATABASE notification_db OWNER notification_user;

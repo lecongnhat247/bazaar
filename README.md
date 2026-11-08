@@ -1,6 +1,6 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Phase 3 records business facts in a service-local outbox and publishes them to a local Kafka broker. Checkout now runs as a saga coordinated by the order service. Catalog reads can come from Redis, and the gateway limits request rate there. A real payment provider is still later work.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Phase 3 records business facts in a service-local outbox and publishes them to a local Kafka broker. Checkout now runs as a saga coordinated by the order service. Catalog reads can come from Redis, and the gateway limits request rate there. Signed-in customers receive their own order and payment notices over a socket. A real payment provider is still later work.
 
 ## Phase 1
 
@@ -36,7 +36,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M2 | Transactional outbox and idempotent consumers | Complete |
 | M3 | Saga orchestration | Complete |
 | M4 | Redis | Complete |
-| M5 | Notifications and WebSocket | Not started |
+| M5 | Notifications and WebSocket | Complete |
 | M6 | Reliability and testing | Not started |
 | M7 | Integration | Not started |
 
@@ -73,6 +73,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | Inventory | `services/inventory-service` | 8083 | 8080 |
 | Order | `services/order-service` | 8084 | 8080 |
 | Payment | `services/payment-service` | 8085 | 8080 |
+| Notification | `services/notification-service` | 8086 | 8080 |
 
 Inside Compose and Kubernetes every backend container listens on port 8080. The host ports above are for local processes and published Compose ports. Service-to-service calls use DNS names and port 8080.
 

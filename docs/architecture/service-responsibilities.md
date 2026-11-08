@@ -88,7 +88,17 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/payments/info`. Both sta
 
 Phase 2 stores mock payments and payment attempts. A payment is bound to an order id and an amount. The same idempotency key cannot create a second payment, and an order cannot have two pending or successful payments. Success and failure are simulated. There is no card network and no call to the order service yet.
 
-A real status change to `SUCCEEDED`, `FAILED`, or `CANCELLED` inserts one `bazaar.payment.events` row in that same transaction. Creating a pending payment does not. Readiness does not include Kafka.
+A real status change to `SUCCEEDED`, `FAILED`, or `CANCELLED` inserts one `bazaar.payment.events` row in that same transaction. Creating a pending payment does not. Readiness does not include Kafka. Those facts include `customerId` so another service can route them without reading `payment_db`.
+
+## Notification Service
+
+| | |
+| --- | --- |
+| Technology | NestJS, Socket.IO |
+| Port | 8080 in a container, 8086 as a published host port |
+| Data | PostgreSQL `notification_db`. Redis only fans socket events out to more than one instance. |
+
+The service consumes `bazaar.order.events` and `bazaar.payment.events`. It stores `ORDER_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `ORDER_CONFIRMED`, and `ORDER_CANCELLED` for the `customerId` in the event. It does not read the order or payment databases. `GET /api/v1/notifications` returns the rows for the verified token subject. The socket joins `customer:{subject}` from that same token. The browser cannot pick a customer id. A disconnect does not delete the rows. Readiness is the database and does not include Kafka or Redis.
 
 ## Storefront
 
@@ -102,20 +112,21 @@ Phase 1 serves a responsive landing page and a gateway connectivity check.
 
 Phase 2 adds the customer shop: product list and detail, a browser cart, Keycloak sign-in, checkout, payment simulation, and order history. The browser calls the storefront. The storefront calls the gateway with the access token from an HTTP-only cookie. Product prices in the cart are only a preview.
 
+The order page also opens a socket to the notification service with that cookie. A notice for the open order is shown as text and the page reads the order again. The badge stays the order service status. Reconnect loads the saved notices and the order. The socket is not a financial record.
+
 ## Ownership rules
 
 - Each future database belongs to exactly one service. Tables are not shared.
 - The gateway and the storefront do not own a database.
 - The gateway does not call a database. It forwards the caller's token.
-- Checkout is synchronous REST. The order service calls catalog, inventory, and payment with the caller's token. It does not share their tables. [ADR-003](../adr/ADR-003-rest-communication.md) still defers events and a Saga.
+- Checkout is a saga. The order service does not share tables with catalog, inventory, or payment. The notification service owns `notification_db` and does not read the other databases.
 
 ## Later services
 
-These services are not part of Phase 1 and have no folders yet.
+These services are not part of the current milestone and have no folders yet.
 
 | Service | Planned stack | Planned data |
 | --- | --- | --- |
-| Notification | NestJS | Its own store, plus WebSocket connections to browsers |
 | Recommendation | Python and FastAPI | Read models derived from events |
 | Analytics | C# and .NET | SQL Server read models |
 

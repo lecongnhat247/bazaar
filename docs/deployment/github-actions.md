@@ -4,8 +4,8 @@ Two workflows live in `.github/workflows/`. They use `GITHUB_TOKEN`. No registry
 
 | Workflow | When it runs | What it does |
 | --- | --- | --- |
-| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront unit tests, lint, and production build, Helm lint. Pull requests also build the seven images and do not push them. |
-| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the seven images and pushes them to GHCR. |
+| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront unit tests, lint, and production build, notification service tests and build, Helm lint. Pull requests also build the eight images and do not push them. |
+| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the eight images and pushes them to GHCR. |
 
 A GitHub Release that creates a `v*` tag publishes images through the tag push. The publish workflow has no `pull_request` trigger and no `pull_request_target` trigger. A pull request from a fork cannot push images. The publish job also exits if it is ever invoked for a fork pull request.
 
@@ -15,7 +15,7 @@ Each job sets its own permissions. The workflow default is empty.
 
 | Job | Token permissions |
 | --- | --- |
-| Backend tests, storefront, Helm lint, pull-request image build | `contents: read` |
+| Backend tests, storefront, notification service, Helm lint, pull-request image build | `contents: read` |
 | Image publish | `contents: read` and `packages: write` |
 
 `packages: write` is what lets `GITHUB_TOKEN` create and update packages in GHCR. It is not granted to pull-request jobs. The login step uses `github.actor` as the user and `secrets.GITHUB_TOKEN` as the password. Nothing else is accepted as a credential.
@@ -39,6 +39,7 @@ ghcr.io/<owner>/bazaar-<application>:<tag>
 | Order | `ghcr.io/<owner>/bazaar-order-service` |
 | Payment | `ghcr.io/<owner>/bazaar-payment-service` |
 | Storefront | `ghcr.io/<owner>/bazaar-storefront` |
+| Notification | `ghcr.io/<owner>/bazaar-notification-service` |
 
 Tags:
 

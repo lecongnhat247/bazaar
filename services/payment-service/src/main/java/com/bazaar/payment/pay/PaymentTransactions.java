@@ -89,6 +89,7 @@ public class PaymentTransactions {
             attempt(id, attemptType, status, now);
             outbox.add(eventType(status), "payment", id.toString(), id, java.util.Map.of(
                     "orderId", current.orderId().toString(),
+                    "customerId", current.payerId(),
                     "amount", current.amount().toPlainString(),
                     "currency", current.currency(),
                     "status", status), now);
@@ -121,6 +122,7 @@ public class PaymentTransactions {
             attempt(id, "REFUND", "REFUNDED", now);
             outbox.add("payment.refunded", "payment", id.toString(), id, java.util.Map.of(
                     "orderId", current.orderId().toString(),
+                    "customerId", current.payerId(),
                     "amount", current.amount().toPlainString(),
                     "currency", current.currency(),
                     "status", "REFUNDED"), now);

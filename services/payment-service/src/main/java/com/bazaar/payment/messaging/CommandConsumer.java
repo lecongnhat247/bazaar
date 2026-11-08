@@ -115,6 +115,7 @@ public class CommandConsumer {
     private void reply(String eventType, PaymentResponse payment, java.time.Instant now) {
         outbox.add(eventType, "payment", payment.id().toString(), payment.id(), java.util.Map.of(
                 "orderId", payment.orderId().toString(),
+                "customerId", payment.payerId(),
                 "amount", payment.amount().toPlainString(),
                 "currency", payment.currency(),
                 "status", payment.status()), now);

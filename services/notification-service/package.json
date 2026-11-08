@@ -1,0 +1,32 @@
+{
+  "name": "notification-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11",
+    "@nestjs/core": "^11",
+    "@nestjs/platform-express": "^11",
+    "@nestjs/platform-socket.io": "^11",
+    "@nestjs/websockets": "^11",
+    "@socket.io/redis-adapter": "^8",
+    "ioredis": "^5",
+    "kafkajs": "^2",
+    "pg": "^8",
+    "reflect-metadata": "^0.2",
+    "rxjs": "^7"
+  },
+  "devDependencies": {
+    "@types/jest": "^30",
+    "@types/node": "^24",
+    "@types/pg": "^8",
+    "jest": "^30",
+    "socket.io-client": "^4",
+    "ts-jest": "^29",
+    "typescript": "^5"
+  }
+}

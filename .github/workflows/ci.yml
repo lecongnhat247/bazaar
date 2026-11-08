@@ -58,6 +58,31 @@ jobs:
           npm run lint
           npm run build
 
+  notification:
+    name: Notification service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/notification-service
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: services/notification-service/package-lock.json
+
+      - name: Install, test, and build
+        run: |
+          npm ci
+          npm test
+          npm run build
+
   chart:
     name: Helm chart
     runs-on: ubuntu-latest
@@ -101,6 +126,8 @@ jobs:
             dockerfile: services/payment-service/Dockerfile
           - name: storefront
             dockerfile: apps/storefront/Dockerfile
+          - name: notification-service
+            dockerfile: services/notification-service/Dockerfile
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7

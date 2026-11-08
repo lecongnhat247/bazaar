@@ -18,9 +18,13 @@ export async function proxy(path: string, init: RequestInit = {}): Promise<NextR
   if (!gatewayUrl) {
     return NextResponse.json({ error: "API_GATEWAY_URL is not set." }, { status: 503 });
   }
+  return fetchService(`${gatewayUrl}${path}`, init);
+}
+
+export async function fetchService(url: string, init: RequestInit = {}): Promise<NextResponse> {
   const jar = await cookies();
   let access = jar.get("bazaar_access")?.value;
-  let response = await call(gatewayUrl, path, init, access);
+  let response = await call(url, init, access);
   if (response.status === 401) {
     const renewed = await renew(jar.get("bazaar_refresh")?.value);
     if (renewed) {
@@ -29,7 +33,7 @@ export async function proxy(path: string, init: RequestInit = {}): Promise<NextR
         jar.set("bazaar_refresh", renewed.refresh_token, cookieOptions(60 * 30));
       }
       access = renewed.access_token;
-      response = await call(gatewayUrl, path, init, access);
+      response = await call(url, init, access);
     }
   }
   const body = await response.text();
@@ -46,12 +50,12 @@ async function renew(refresh: string | undefined): Promise<TokenSet | null> {
   return refreshTokens(refresh);
 }
 
-async function call(gatewayUrl: string, path: string, init: RequestInit, access: string | undefined): Promise<Response> {
+async function call(url: string, init: RequestInit, access: string | undefined): Promise<Response> {
   const headers = new Headers(init.headers);
   if (access) {
     headers.set("Authorization", `Bearer ${access}`);
   }
-  return fetch(`${gatewayUrl}${path}`, {
+  return fetch(url, {
     ...init,
     headers,
     cache: "no-store",

@@ -46,6 +46,8 @@ jobs:
             dockerfile: services/payment-service/Dockerfile
           - name: storefront
             dockerfile: apps/storefront/Dockerfile
+          - name: notification-service
+            dockerfile: services/notification-service/Dockerfile
     steps:
       - name: Refuse an untrusted pull request
         if: github.event_name == 'pull_request' || github.event.pull_request.head.repo.fork == true

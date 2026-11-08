@@ -609,7 +609,11 @@ class OrderTransactions {
     }
 
     private void fact(UUID orderId, String eventType, String status, Instant now) {
-        outbox.add(eventType, "order", orderId.toString(), orderId, money(latestCurrency(orderId), latestTotal(orderId), status), now, orderTopic);
+        outbox.add(eventType, "order", orderId.toString(), orderId, java.util.Map.of(
+                "status", status,
+                "currency", latestCurrency(orderId),
+                "total", latestTotal(orderId).toPlainString(),
+                "customerId", latestCustomer(orderId)), now, orderTopic);
     }
 
     private void command(String topic, String eventType, String aggregateId, UUID correlationId, Object payload, Instant now) {
@@ -626,8 +630,8 @@ class OrderTransactions {
         };
     }
 
-    private java.util.Map<String, String> money(String currency, BigDecimal total, String status) {
-        return java.util.Map.of("status", status, "currency", currency, "total", total.toPlainString());
+    private String latestCustomer(UUID orderId) {
+        return jdbc.queryForObject("SELECT customer_id FROM customer_order WHERE id = ?", String.class, orderId);
     }
 
     private String latestCurrency(UUID orderId) {
