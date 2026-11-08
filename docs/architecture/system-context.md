@@ -1,12 +1,12 @@
 # System context
 
-Phase 1 has one human actor and one software system. The system is made of a storefront and six backend processes. Those processes are inside the BAZAAR boundary. The customer reaches them through a browser.
+The customer reaches BAZAAR through the storefront. The storefront calls the gateway. The notification socket is the one backend connection the browser opens directly.
 
 ```mermaid
 flowchart TB
   customer[Customer]
 
-  subgraph bazaar [BAZAAR Phase 1]
+  subgraph bazaar [BAZAAR]
     storefront[Storefront]
     gateway[API Gateway]
     identity[Identity Service]
@@ -14,35 +14,51 @@ flowchart TB
     inventory[Inventory Service]
     orders[Order Service]
     payments[Payment Service]
+    notify[Notification Service]
   end
 
-  customer -->|browses the landing page| storefront
-  customer -->|may call published APIs| gateway
-  storefront -->|checks gateway health| gateway
+  keycloak[Keycloak]
+  kafka[Kafka]
+  redis[Redis]
+
+  customer -->|shop, cart, checkout| storefront
+  customer -->|own order notices| notify
+  storefront --> gateway
+  storefront --> notify
   gateway --> identity
   gateway --> catalog
   gateway --> inventory
   gateway --> orders
   gateway --> payments
+  orders --> kafka
+  inventory --> kafka
+  payments --> kafka
+  catalog --> kafka
+  kafka --> notify
+  catalog --> redis
+  gateway --> redis
+  identity --> keycloak
+  notify --> keycloak
 ```
 
 ## Actors
 
-| Actor | Relationship in Phase 1 |
+| Actor | Relationship |
 | --- | --- |
-| Customer | Opens the storefront and can call the gateway health and info routes. |
-| Developer | Builds and runs the skeleton locally, in Compose, or on kind. |
+| Customer | Browses, checks out, and receives only their own order notices. |
+| Seller | Publishes products. The seller application is still the same storefront and API. |
+| Developer | Builds and runs the stack locally in Compose, or the application chart on kind. |
 | GitHub Actions | Builds, tests, and publishes images to GHCR on trusted branches. |
 
-Seller, administrator, and operations users are later actors. They have no application in Phase 1.
+Administrator and operations consoles are later applications. They have no separate frontend.
 
 ## External systems
 
-Phase 1 integrates with no payment provider, identity provider, database, or message broker. GHCR is the only planned external system, and it is used by CI to store images. A developer can run the whole skeleton without GHCR by building and loading images locally.
+Keycloak issues tokens. PostgreSQL holds one database per service. Kafka carries events and commands. Redis caches public catalog reads, counts gateway requests, and can fan socket events out. There is no card network. GHCR stores images from CI. A developer can run Compose without GHCR by building the images locally.
 
 ## Boundary rules
 
-- The browser talks to the storefront for the page, and to the gateway only when an API is called directly.
-- Backend services are reached through the gateway. A service does not call another service in Phase 1.
-- The storefront server may call the gateway health endpoint. It does not contain business rules.
-- The gateway routes and applies CORS. It does not contain marketplace rules.
+- The browser talks to the storefront for pages and to the notification service for the socket. It does not talk to Kafka.
+- Business HTTP calls go through the gateway. The order service calls the catalog over HTTP for the checkout price. Inventory and payment are driven by commands, not by that checkout request.
+- The storefront keeps the access token in an HTTP-only cookie and attaches it when it calls the gateway or the notification service.
+- The gateway routes, applies CORS, and limits request rate. It does not decide whether a token may call a service.

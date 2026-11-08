@@ -1,6 +1,6 @@
 # BAZAAR
 
-BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Phase 3 records business facts in a service-local outbox and publishes them to a local Kafka broker. Checkout now runs as a saga coordinated by the order service. Catalog reads can come from Redis, and the gateway limits request rate there. Signed-in customers receive their own order and payment notices over a socket. A real payment provider is still later work.
+BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 2 is the customer purchase journey on Docker Compose: sign in, browse, cart, checkout, mock payment, and order history. Phase 3 records business facts in a service-local outbox and publishes them to a local Kafka broker. Checkout now runs as a saga coordinated by the order service. Catalog reads can come from Redis, and the gateway limits request rate there. Signed-in customers receive their own order and payment notices over a socket. A failed event is kept on a dead-letter topic or as a DEAD outbox row. A real payment provider is still later work.
 
 ## Phase 1
 
@@ -38,7 +38,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M4 | Redis | Complete |
 | M5 | Notifications and WebSocket | Complete |
 | M6 | Reliability and testing | Complete |
-| M7 | Integration | Not started |
+| M7 | Integration | Complete |
 
 ## Documentation
 

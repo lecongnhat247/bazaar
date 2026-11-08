@@ -17,11 +17,14 @@ flowchart TB
     inventory["inventory-service<br/>Spring Boot<br/>:8080"]
     orders["order-service<br/>Spring Boot<br/>:8080"]
     payments["payment-service<br/>Spring Boot<br/>:8080"]
+    notify["notification-service<br/>NestJS<br/>:8080"]
   end
 
   browser --> storefront
   browser --> gateway
-  storefront -->|GET /actuator/health via API_GATEWAY_URL| gateway
+  browser -->|socket, cookie| notify
+  storefront -->|API_GATEWAY_URL| gateway
+  storefront -->|NOTIFICATION_URL| notify
   gateway -->|/api/v1/identity/**| identity
   gateway -->|/api/v1/catalog/**| catalog
   gateway -->|/api/v1/categories/**| catalog
@@ -31,7 +34,7 @@ flowchart TB
   gateway -->|/api/v1/payments/**| payments
 ```
 
-The ports in the internal tier are container ports. On a laptop, those processes bind 8081 through 8085 so they can run side by side. See [deployment architecture](deployment-architecture.md).
+The ports in the internal tier are container ports. On a laptop, the Java processes bind 8081 through 8085 and the notification service is published on 8086. The browser socket does not pass through the gateway. See [deployment architecture](deployment-architecture.md).
 
 ## Routes
 

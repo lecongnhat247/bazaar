@@ -8,7 +8,7 @@ Every backend process listens on `SERVER_PORT`.
 
 | Place | Backend listen port | How callers reach it |
 | --- | --- | --- |
-| Local process | Gateway 8080, other services 8081–8085 | `localhost` and that port |
+| Local process | Gateway 8080, Java services 8081–8085, notification 8086 | `localhost` and that port |
 | Container | 8080 for every backend | Compose DNS or Kubernetes Service DNS on port 8080 |
 | Storefront | 3000 everywhere | Host port 3000, or `kubectl port-forward` |
 
@@ -22,6 +22,7 @@ Downstream URLs therefore differ by environment:
 | `INVENTORY_SERVICE_URL` | `http://localhost:8083` | `http://inventory-service:8080` |
 | `ORDER_SERVICE_URL` | `http://localhost:8084` | `http://order-service:8080` |
 | `PAYMENT_SERVICE_URL` | `http://localhost:8085` | `http://payment-service:8080` |
+| `NOTIFICATION_URL` | `http://localhost:8086` | `http://notification-service:8080` |
 
 `API_GATEWAY_URL` is read by the storefront server at request time. The landing page calls a same-origin route, which then calls the gateway. The image stays usable when the gateway address changes.
 
@@ -45,28 +46,44 @@ flowchart TB
     inventory[inventory-service:8080]
     orders[order-service:8080]
     payments[payment-service:8080]
+    notify[notification-service:8080]
+    postgres[(Postgres)]
+    kafka[Kafka]
+    redis[Redis]
+    keycloak[Keycloak]
   end
 
   browser -->|localhost:3000| storefront
   browser -->|localhost:8080| gateway
+  browser -->|localhost:8086 socket| notify
   storefront -->|API_GATEWAY_URL| gateway
+  storefront -->|NOTIFICATION_URL| notify
   gateway --> identity
   gateway --> catalog
   gateway --> inventory
   gateway --> orders
   gateway --> payments
+  orders --> kafka
+  inventory --> kafka
+  payments --> kafka
+  catalog --> kafka
+  kafka --> notify
+  catalog --> redis
+  gateway --> redis
+  notify --> redis
+  notify --> postgres
 ```
 
 Compose requirements:
 
 - One user-defined network named `bazaar`.
-- Published host ports 3000 and 8080–8085.
-- `restart: unless-stopped` for local recovery.
-- Health checks against gateway and service Actuator readiness, and against the storefront root path.
+- Published host ports 3000, 5432, 6379, 8080–8086, 8088, and 9092.
+- `restart: unless-stopped` for the long-running services. Init containers exit when their job is done.
+- Health checks against gateway and service Actuator readiness, the notification readiness path, and the storefront root path.
 - The storefront health check does not call the gateway. A gateway failure must not make Compose restart the storefront.
 - Multi-stage Dockerfiles, a non-root user, and no build tools in the runtime image.
-- No secrets in the image or the Compose file. Phase 1 has no secret values.
-- No PostgreSQL, MongoDB, Kafka, or Redis.
+- Local development passwords are in the Compose file. They are not production credentials, and they are not copied into the image.
+- One Postgres server holds a database per service, plus Keycloak. Kafka is one KRaft broker. Redis has no disk.
 
 Run Compose only while the kind cluster is stopped. Docker Desktop on this machine has about 7.6 GiB for containers.
 
@@ -149,49 +166,27 @@ Java services set `logging.structured.format.console` to `ecs`. Each line includ
 
 `server.shutdown=graceful` lets in-flight requests finish before the process exits. Kubernetes uses the same idea through the termination grace period and the default preStop behavior of removing the pod from the Service before the process stops.
 
-## Future target architecture
+## Still later
 
-The diagram below is **future scope**. None of these datastores, brokers, or extra applications are part of Phase 1, and Phase 1 must not add them.
+Seller and admin portals, recommendations, and analytics are not in this repository. Catalog data is PostgreSQL, not MongoDB. Notification, Kafka, Redis, and the per-service databases are already in Compose.
 
 ```mermaid
 flowchart TB
-  subgraph future [Future scope]
+  subgraph later [Not built]
     seller[Seller portal]
     admin[Admin portal]
-    live[Live operations]
-    notify[Notification service]
     recommend[Recommendation service]
     analytics[Analytics service]
-
-    pgId[(Identity PostgreSQL)]
-    mongo[(Catalog MongoDB)]
-    pgInv[(Inventory PostgreSQL)]
-    pgOrd[(Order PostgreSQL)]
-    pgPay[(Payment PostgreSQL)]
     sql[(Analytics SQL Server)]
-    kafka[Kafka]
-    redis[Redis]
   end
 
-  seller --> gatewayFuture[API Gateway]
-  admin --> gatewayFuture
-  live --> notify
-  kafka --> notify
-  kafka --> recommend
-  kafka --> analytics
+  seller --> gatewayLater[API Gateway]
+  admin --> gatewayLater
+  kafkaLater[Kafka] --> recommend
+  kafkaLater --> analytics
   analytics --> sql
-  identityFuture[Identity] --> pgId
-  catalogFuture[Catalog] --> mongo
-  inventoryFuture[Inventory] --> pgInv
-  orderFuture[Order] --> pgOrd
-  paymentFuture[Payment] --> pgPay
-  identityFuture --> kafka
-  catalogFuture --> kafka
-  inventoryFuture --> kafka
-  orderFuture --> kafka
-  paymentFuture --> kafka
 ```
 
-When that work starts, each database belongs to one service ([ADR-005](../adr/ADR-005-database-ownership.md)). Events use an envelope with `eventId`, `eventType`, `aggregateId`, `aggregateVersion`, `occurredAt`, `schemaVersion`, `correlationId`, `causationId`, and `payload`. Delivery is at least once, with idempotent consumers, retries, and a dead-letter path. The outbox and Saga replace the synchronous checkout coordination. WebSocket stays on the notification edge.
+Each database belongs to one service ([ADR-005](../adr/ADR-005-database-ownership.md)). Events use an envelope with `eventId`, `eventType`, `aggregateId`, `occurredAt`, `correlationId`, and `payload`. Delivery is at least once. Consumers are idempotent, retries are bounded, and a dead-letter topic keeps a message that could not be applied. Checkout is a saga. The socket stays on the notification edge.
 
-Managed databases outside the application cluster are the preferred production option. Phase 1 does not provision them.
+Managed databases outside the application cluster are the preferred production option. This repository does not provision them.
