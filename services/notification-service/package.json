@@ -21,6 +21,9 @@
     "reflect-metadata": "^0.2",
     "rxjs": "^7"
   },
+  "overrides": {
+    "multer": "2.5.0"
+  },
   "devDependencies": {
     "@types/jest": "^30",
     "@types/node": "^24",

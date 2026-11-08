@@ -51,6 +51,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M4 | Flash sale | Complete |
 | M5 | Resilience | Complete |
 | M6 | Kubernetes production readiness | Complete |
+| M7 | CI/CD and release | Complete |
 
 ## Documentation
 
@@ -70,6 +71,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [kind and Helm](docs/deployment/kubernetes-kind.md)
 - [Remote Kubernetes](docs/deployment/remote-kubernetes.md)
 - [GitHub Actions and GHCR](docs/deployment/github-actions.md)
+- [Release](docs/deployment/release.md)
 - [Local development](docs/development/local-development.md)
 - [ADR-001 Monorepo](docs/adr/ADR-001-monorepo-structure.md)
 - [ADR-002 Java and Spring Boot](docs/adr/ADR-002-java-and-spring-boot.md)

@@ -1,0 +1,109 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable tag, sha-<40 hex> or vX.Y.Z. latest is refused.
+        required: true
+        type: string
+      action:
+        description: validate renders the chart. deploy applies it after the staging environment is approved.
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - deploy
+      values_file:
+        description: Helm values file in this repository. Secrets stay in the cluster.
+        required: true
+        type: choice
+        default: infrastructure/helm/bazaar/values-remote.example.yaml
+        options:
+          - infrastructure/helm/bazaar/values.yaml
+          - infrastructure/helm/bazaar/values-remote.example.yaml
+
+permissions: {}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Helm 4.3.1
+        run: |
+          curl -fsSL "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
+
+      - name: Render the chart
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          VALUES_FILE: ${{ inputs.values_file }}
+        run: |
+          case "$VALUES_FILE" in
+            infrastructure/helm/bazaar/values.yaml|infrastructure/helm/bazaar/values-remote.example.yaml) ;;
+            *)
+              echo "The values file is not one of the chart files."
+              exit 1
+              ;;
+          esac
+          bash infrastructure/scripts/deploy.sh --render "$IMAGE_TAG" --values "$VALUES_FILE" > /tmp/rendered.yaml
+          grep -F ":${IMAGE_TAG}" /tmp/rendered.yaml
+          if grep -F ':latest' /tmp/rendered.yaml; then
+            echo "The rendered chart still contains the latest tag."
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy and check rollout
+    needs: validate
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Helm 4.3.1
+        run: |
+          curl -fsSL "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+
+      - name: Install kubectl 1.37.2
+        run: |
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.37.2/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          rm /tmp/kubectl
+
+      - name: Require a cluster kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          if [[ -z "${KUBECONFIG_DATA}" ]]; then
+            echo "The staging environment has no KUBECONFIG secret. This repository does not deploy to a production cluster."
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KUBECONFIG_DATA" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Deploy and wait for rollout
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          VALUES_FILE: ${{ inputs.values_file }}
+        run: bash infrastructure/scripts/deploy.sh "$IMAGE_TAG" --values "$VALUES_FILE"

@@ -102,6 +102,70 @@ jobs:
       - name: Lint the chart
         run: helm lint infrastructure/helm/bazaar
 
+      - name: Check release tags and render an immutable tag
+        run: |
+          bash infrastructure/scripts/test-release-tag.sh
+          tag="sha-$(printf 'a%.0s' {1..40})"
+          rendered="$(bash infrastructure/scripts/deploy.sh --render "$tag")"
+          printf '%s\n' "$rendered" | grep -F "bazaar-api-gateway:${tag}"
+          printf '%s\n' "$rendered" | grep -F "bazaar-notification-service:${tag}"
+          if printf '%s\n' "$rendered" | grep -F ':latest'; then
+            echo "The rendered chart still contains the latest tag."
+            exit 1
+          fi
+
+  dependencies:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Audit the storefront
+        working-directory: apps/storefront
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      - name: Audit the notification service
+        working-directory: services/notification-service
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      - name: Report high filesystem vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          scanners: vuln
+          version: v0.67.2
+          timeout: 15m
+          skip-dirs: .git,apps/storefront/node_modules,services/notification-service/node_modules
+
+      - name: Fail on critical filesystem vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          scanners: vuln
+          version: v0.67.2
+          timeout: 15m
+          skip-dirs: .git,apps/storefront/node_modules,services/notification-service/node_modules
+
   images:
     name: Image ${{ matrix.name }}
     if: github.event_name == 'pull_request'
@@ -141,6 +205,29 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
-          load: false
           provenance: false
-          tags: bazaar-${{ matrix.name }}:ci
+          outputs: type=oci,dest=${{ github.workspace }}/image.tar
+
+      - name: Report high image vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: ${{ github.workspace }}/image.tar
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          scanners: vuln
+          version: v0.67.2
+          timeout: 15m
+
+      - name: Fail on critical image vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: ${{ github.workspace }}/image.tar
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          scanners: vuln
+          version: v0.67.2
+          timeout: 15m

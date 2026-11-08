@@ -1,11 +1,12 @@
 # GitHub Actions and GHCR
 
-Two workflows live in `.github/workflows/`. They use `GITHUB_TOKEN`. No registry password is stored in the repository.
+Three workflows live in `.github/workflows/`. They use `GITHUB_TOKEN`. No registry password is stored in the repository.
 
 | Workflow | When it runs | What it does |
 | --- | --- | --- |
-| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront unit tests, lint, and production build, notification service tests and build, Helm lint. Pull requests also build the eight images and do not push them. |
-| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the eight images and pushes them to GHCR. |
+| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront tests, lint, and production build, notification tests and build, Helm lint, release-tag checks, npm audit, and Trivy scans of the repository and of the eight images. Pull requests build the images and do not push them. |
+| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the eight images, scans them, and pushes them to GHCR only when the critical scan passes. |
+| `deploy.yml` | Manual run only | Renders the chart for an immutable tag. Applies it only for the `staging` environment when a kubeconfig secret exists. |
 
 A GitHub Release that creates a `v*` tag publishes images through the tag push. The publish workflow has no `pull_request` trigger and no `pull_request_target` trigger. A pull request from a fork cannot push images. The publish job also exits if it is ever invoked for a fork pull request.
 
@@ -15,8 +16,9 @@ Each job sets its own permissions. The workflow default is empty.
 
 | Job | Token permissions |
 | --- | --- |
-| Backend tests, storefront, notification service, Helm lint, pull-request image build | `contents: read` |
+| Backend tests, storefront, notification service, Helm lint, dependency scan, pull-request image build, deploy validation | `contents: read` |
 | Image publish | `contents: read` and `packages: write` |
+| Cluster deploy | `contents: read`, and only after the `staging` environment is selected |
 
 `packages: write` is what lets `GITHUB_TOKEN` create and update packages in GHCR. It is not granted to pull-request jobs. The login step uses `github.actor` as the user and `secrets.GITHUB_TOKEN` as the password. Nothing else is accepted as a credential.
 
@@ -43,10 +45,12 @@ ghcr.io/<owner>/bazaar-<application>:<tag>
 
 Tags:
 
-- `sha-<12 character commit>` on every publish.
-- `latest` only for a push to `main`.
+- `sha-` plus the full 40-character commit SHA on every publish.
+- `latest` only for a push to `main`. Deployments refuse this tag.
 - The git tag, such as `v0.1.0`, when the publish was triggered by a `v*` tag.
-- The manual `image_tag` input when a person runs the workflow and fills it in.
+- The manual `image_tag` input when it is `sha-<40 hex characters>` or `v<major>.<minor>.<patch>`.
+
+The scan and the rollback steps are in [Release](release.md).
 
 The first push of a trusted branch creates the packages. A private repository gets private packages. This milestone added the workflows before the repository had a commit, so the first push is the first live publish. Until that push, GHCR does not contain these images.
 

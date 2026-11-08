@@ -40,6 +40,8 @@ Phase 4 M5 bounds the checkout price lookup. A catalog or inventory failure retu
 
 Phase 4 M6 keeps the same Helm chart and adds the notification workload, autoscaling bounds, a disruption budget for two or more replicas, and an ingress template that stays off. PostgreSQL, Kafka, Redis, and Keycloak remain outside the cluster. The steps are in [kind and Helm](../deployment/kubernetes-kind.md).
 
+Phase 4 M7 scans dependencies and images in GitHub Actions, publishes an immutable commit tag, and keeps cluster deploy on a manual workflow. Rollback names a Helm revision. The steps are in [Release](../deployment/release.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

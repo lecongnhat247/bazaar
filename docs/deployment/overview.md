@@ -47,4 +47,4 @@ A remote cluster on EKS, AKS, GKE, or another Kubernetes distribution uses the s
 
 ## Publishing images
 
-GitHub Actions builds and tests on pull requests. Trusted branch builds and `v*` tags push to GHCR with `GITHUB_TOKEN`. The image name is `ghcr.io/<owner>/bazaar-<application>:<tag>`. Fork pull requests do not receive permission to push. The rules are in [GitHub Actions and GHCR](github-actions.md).
+GitHub Actions builds and tests on pull requests. Trusted branch builds and `v*` tags push to GHCR with `GITHUB_TOKEN` after the image scan. The image name is `ghcr.io/<owner>/bazaar-<application>:<tag>`. The deployable tags are the commit SHA and a `vX.Y.Z` release. Fork pull requests do not receive permission to push. The rules are in [GitHub Actions and GHCR](github-actions.md) and [Release](release.md).
