@@ -47,13 +47,20 @@ docker compose down
 
 One KRaft process combines the broker and the controller. Clients inside Compose use `kafka:19092`. A process on the host uses `localhost:9092`. Catalog, inventory, order, and payment read `KAFKA_BOOTSTRAP_SERVERS`. None of them wait for Kafka before serving HTTP.
 
-`kafka-init` creates the event topics and two command topics after the broker is healthy: `bazaar.order.events`, `bazaar.inventory.events`, `bazaar.payment.events`, `bazaar.catalog.events`, `bazaar.inventory.commands`, and `bazaar.payment.commands`. Each has 3 partitions and replication factor 1. The init container exits when the topics exist. List them with:
+`kafka-init` creates the event topics, two command topics, and `bazaar.dlq` after the broker is healthy: `bazaar.order.events`, `bazaar.inventory.events`, `bazaar.payment.events`, `bazaar.catalog.events`, `bazaar.inventory.commands`, `bazaar.payment.commands`, and `bazaar.dlq`. Each has 3 partitions and replication factor 1. The init container exits when the topics exist. List them with:
 
 ```bash
 docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
-The broker health check is its own command. Readiness stays `/actuator/health/readiness` and does not include Kafka. Broker status is `GET /actuator/health/kafka` on catalog, inventory, order, and payment.
+The broker health check is its own command. Readiness stays `/actuator/health/readiness` and does not include Kafka. Broker status is `GET /actuator/health/kafka` on catalog, inventory, order, and payment. Each of those services logs `bazaar.kafka.consumer.lag` every 30 seconds. `bazaar.outbox.pending` and `bazaar.outbox.dead` are Micrometer gauges. They are not a separate monitoring stack.
+
+A small k6 smoke lives in `infrastructure/k6`. It is for this machine, not a capacity claim. From the repository root, with Compose already up:
+
+```bash
+export MSYS_NO_PATHCONV=1
+docker run --rm -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/catalog.js
+```
 
 Redis keeps a 64 MB cache with no disk snapshot. Catalog and the gateway read `REDIS_HOST`. Neither waits for Redis before serving HTTP, and readiness does not include Redis. A restart drops cached pages and rate-limit counters. PostgreSQL remains the catalog source of truth. The notification service can use the same Redis to share socket rooms across instances. Its notices stay in PostgreSQL.
 

@@ -70,3 +70,6 @@ bazaar:
     poll-delay: ${OUTBOX_POLL_DELAY:1000}
     batch-size: ${OUTBOX_BATCH_SIZE:20}
     stale: ${OUTBOX_STALE:30s}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
+  dlq:
+    topic: ${DLQ_TOPIC:bazaar.dlq}

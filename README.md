@@ -37,7 +37,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M3 | Saga orchestration | Complete |
 | M4 | Redis | Complete |
 | M5 | Notifications and WebSocket | Complete |
-| M6 | Reliability and testing | Not started |
+| M6 | Reliability and testing | Complete |
 | M7 | Integration | Not started |
 
 ## Documentation

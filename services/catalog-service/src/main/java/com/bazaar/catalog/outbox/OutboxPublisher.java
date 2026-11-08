@@ -27,6 +27,7 @@ public class OutboxPublisher {
     private final String producer;
     private final int batchSize;
     private final Duration stale;
+    private final int maxAttempts;
     private final Counter published;
     private final Counter failed;
 
@@ -37,24 +38,27 @@ public class OutboxPublisher {
             MeterRegistry meters,
             @Value("${spring.application.name}") String producer,
             @Value("${bazaar.outbox.batch-size:20}") int batchSize,
-            @Value("${bazaar.outbox.stale:30s}") Duration stale) {
+            @Value("${bazaar.outbox.stale:30s}") Duration stale,
+            @Value("${bazaar.outbox.max-attempts:5}") int maxAttempts) {
         this.store = store;
         this.events = events;
         this.objectMapper = objectMapper;
         this.producer = producer;
         this.batchSize = batchSize;
         this.stale = stale;
+        this.maxAttempts = maxAttempts;
         this.published = meters.counter("bazaar.outbox.published");
         this.failed = meters.counter("bazaar.outbox.failed");
         meters.gauge("bazaar.outbox.pending", store, OutboxStore::pending);
+        meters.gauge("bazaar.outbox.dead", store, OutboxStore::dead);
     }
 
     @Scheduled(fixedDelayString = "${bazaar.outbox.poll-delay:1000}", initialDelayString = "${bazaar.outbox.poll-delay:1000}")
     public void publishPending() {
         Instant now = Instant.now();
-        int interrupted = store.recoverStale(now.minus(stale));
+        int interrupted = store.recoverStale(now.minus(stale), maxAttempts, now.plusSeconds(2));
         if (interrupted > 0) {
-            log.warn("Outbox rows returned to pending after an interrupted publication count={}", interrupted);
+            log.warn("Outbox recovered interrupted publications count={}", interrupted);
         }
         for (OutboxMessage message : store.claim(batchSize, now)) {
             try {
@@ -62,14 +66,32 @@ public class OutboxPublisher {
                 store.markPublished(message.id(), Instant.now());
                 published.increment();
             } catch (RuntimeException exception) {
-                store.markFailed(message.id(), exception.toString());
+                int attempt = message.retryCount() + 1;
+                String status = store.markFailed(message.id(), exception.toString(), maxAttempts, nextAttempt(now, attempt));
                 failed.increment();
-                log.warn(
-                        "Outbox publication failed eventId={} retryCount={}",
-                        message.eventId(),
-                        message.retryCount() + 1);
+                if ("DEAD".equals(status)) {
+                    log.error(
+                            "Outbox publication exhausted eventId={} correlationId={} aggregateId={} retryCount={} error={}",
+                            message.eventId(),
+                            message.correlationId(),
+                            message.aggregateId(),
+                            attempt,
+                            exception.toString());
+                } else {
+                    log.warn(
+                            "Outbox publication failed eventId={} correlationId={} aggregateId={} retryCount={}",
+                            message.eventId(),
+                            message.correlationId(),
+                            message.aggregateId(),
+                            attempt);
+                }
             }
         }
+    }
+
+    private static Instant nextAttempt(Instant now, int attempt) {
+        long seconds = Math.min(30L, 1L << Math.min(Math.max(attempt - 1, 0), 4));
+        return now.plusSeconds(seconds);
     }
 
     private EventEnvelope envelope(OutboxMessage message) {

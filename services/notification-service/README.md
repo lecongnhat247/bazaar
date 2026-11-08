@@ -4,7 +4,7 @@ Turns order and payment facts into a customer's own notices. The browser never t
 
 The service listens to `bazaar.order.events` and `bazaar.payment.events` in group `notification-service`. It keeps `ORDER_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `ORDER_CONFIRMED`, and `ORDER_CANCELLED`. A repeated `eventId` is stored once. Notices survive a disconnect in `notification_db`. The socket is only the live path: after a reconnect the storefront reads `GET /api/v1/notifications` and the order from the order service.
 
-Readiness is the database. Kafka and Redis are not part of it. If Redis is set, Socket.IO uses it to fan out across instances. If Redis does not answer, that process keeps its own connections.
+A payload that is not JSON is copied to `bazaar.dlq` at once. A transient failure is retried twice with a longer pause each time, then copied there too. The log includes `eventId` and `correlationId`. Consumer lag is logged every 30 seconds. Readiness is the database. Kafka and Redis are not part of it. If Redis is set, Socket.IO uses it to fan out across instances. If Redis does not answer, that process keeps its own connections.
 
 ## Requirements
 

@@ -13,9 +13,11 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +43,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -48,6 +53,7 @@ import com.bazaar.order.checkout.SagaCoordinator;
 import com.bazaar.order.messaging.EventEnvelope;
 import com.bazaar.order.messaging.OrderEventConsumer;
 import com.bazaar.order.outbox.OutboxPublisher;
+import com.bazaar.order.outbox.OutboxStore;
 
 import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -90,6 +96,9 @@ class OrderApplicationTests {
 
     @Autowired
     private OutboxPublisher outbox;
+
+    @Autowired
+    private OutboxStore outboxStore;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -212,6 +221,56 @@ class OrderApplicationTests {
         ConsumerRecord<String, String> record = new ConsumerRecord<>("bazaar.order.events", 0, 0L, "other-key", body);
         assertThatThrownBy(() -> orderEvents.onOrderEvent(record))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void publicationGivesUpAfterTheAttemptLimit() {
+        UUID correlation = UUID.randomUUID();
+        outboxStore.add(
+                "order.failed",
+                "order",
+                UUID.randomUUID().toString(),
+                correlation,
+                Map.of("status", "FAILED"),
+                Instant.parse("2026-11-08T00:00:00Z"),
+                "bazaar.order.events");
+        UUID id = jdbc.queryForObject("SELECT id FROM outbox WHERE correlation_id = ?", UUID.class, correlation);
+        for (int attempt = 0; attempt < 4; attempt++) {
+            assertThat(outboxStore.markFailed(id, "broker down", 5, Instant.now().plusSeconds(60))).isEqualTo("PENDING");
+        }
+        assertThat(outboxStore.claim(20, Instant.now())).extracting("id").doesNotContain(id);
+        assertThat(outboxStore.markFailed(id, "broker down", 5, Instant.now())).isEqualTo("DEAD");
+        Integer dead = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE id = ? AND status = 'DEAD' AND retry_count = 5",
+                Integer.class,
+                id);
+        assertThat(dead).isEqualTo(1);
+    }
+
+    @Test
+    void invalidEventIsCopiedToTheDeadLetterTopic() throws Exception {
+        Properties properties = new Properties();
+        properties.put("bootstrap.servers", KAFKA.getBootstrapServers());
+        properties.put("group.id", "order-dlq-test");
+        properties.put("key.deserializer", StringDeserializer.class.getName());
+        properties.put("value.deserializer", StringDeserializer.class.getName());
+        properties.put("auto.offset.reset", "earliest");
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
+            consumer.subscribe(List.of("bazaar.dlq"));
+            consumer.poll(Duration.ofMillis(1000));
+            KafkaTemplate<String, String> kafka = applicationContext.getBean(KafkaTemplate.class);
+            kafka.send("bazaar.order.events", "poison-key", "not-json").get(10, TimeUnit.SECONDS);
+            String found = null;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+            while (found == null && System.nanoTime() < deadline) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500))) {
+                    if (record.value().contains("not-json")) {
+                        found = record.value();
+                    }
+                }
+            }
+            assertThat(found).contains("not-json").contains("bazaar.order.events");
+        }
     }
 
     @Test

@@ -9,15 +9,21 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.core.KafkaAdmin;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.util.backoff.ExponentialBackOff;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration
 @EnableScheduling
@@ -26,14 +32,67 @@ public class KafkaConfig {
     private static final Logger log = LoggerFactory.getLogger(KafkaConfig.class);
 
     @Bean
-    DefaultErrorHandler kafkaErrorHandler() {
-        ConsumerRecordRecoverer recoverer = (ConsumerRecord<?, ?> record, Exception exception) -> log.error(
-                "Event skipped after retries topic={} partition={} offset={}",
+    DefaultErrorHandler kafkaErrorHandler(
+            KafkaTemplate<String, String> kafka,
+            ObjectMapper objectMapper,
+            @Value("${bazaar.dlq.topic:bazaar.dlq}") String deadLetterTopic) {
+        ConsumerRecordRecoverer recoverer = (ConsumerRecord<?, ?> record, Exception exception) -> {
+            String eventId = field(record.value(), "eventId");
+            String correlationId = field(record.value(), "correlationId");
+            String body = objectMapper.writeValueAsString(java.util.Map.of(
+                    "originalTopic", String.valueOf(record.topic()),
+                    "originalPartition", record.partition(),
+                    "originalOffset", record.offset(),
+                    "eventId", eventId,
+                    "correlationId", correlationId,
+                    "error", exception.toString(),
+                    "value", String.valueOf(record.value())));
+            try {
+                kafka.send(deadLetterTopic, record.key() == null ? null : record.key().toString(), body).get(5, TimeUnit.SECONDS);
+                log.error(
+                        "Dead letter originalTopic={} eventId={} correlationId={} error={}",
+                        record.topic(),
+                        eventId,
+                        correlationId,
+                        exception.toString());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                log.error(
+                        "Dead letter was not copied originalTopic={} eventId={} correlationId={} error={}",
+                        record.topic(),
+                        eventId,
+                        correlationId,
+                        interrupted.toString());
+            } catch (Exception publishError) {
+                log.error(
+                        "Dead letter was not copied originalTopic={} eventId={} correlationId={} error={}",
+                        record.topic(),
+                        eventId,
+                        correlationId,
+                        publishError.toString());
+            }
+        };
+        ExponentialBackOff backOff = new ExponentialBackOff(200L, 2.0);
+        backOff.setMaxInterval(2_000L);
+        backOff.setMaxElapsedTime(5_000L);
+        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
+        handler.addNotRetryableExceptions(IllegalArgumentException.class, JacksonException.class, DataIntegrityViolationException.class);
+        handler.setRetryListeners((record, exception, attempt) -> log.warn(
+                "Event retry originalTopic={} attempt={} error={}",
                 record.topic(),
-                record.partition(),
-                record.offset(),
-                exception);
-        return new DefaultErrorHandler(recoverer, new FixedBackOff(500L, 2L));
+                attempt,
+                exception.toString()));
+        return handler;
+    }
+
+    private static String field(Object value, String name) {
+        if (value == null) {
+            return "";
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\"" + name + "\"\\s*:\\s*\"([^\"]*)\"")
+                .matcher(value.toString());
+        return matcher.find() ? matcher.group(1) : "";
     }
 
     @Bean

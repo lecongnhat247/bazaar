@@ -2,7 +2,7 @@
 
 Kafka carries JSON envelopes. A service does not share its Java domain classes with another service. `eventVersion` is the schema version named `schemaVersion` in [ADR-003](../../docs/adr/ADR-003-rest-communication.md).
 
-Catalog, inventory, order, and payment publish the facts below from a local outbox table. The business row and the outbox row commit together. A poller sends the JSON after that commit and marks the row published only after the broker acknowledges it. If the process stops between the acknowledgement and that update, the same `eventId` is sent again. Each service stores `(consumer_name, event_id)` in `processed_events` and skips a duplicate. Delivery is at-least-once. This is not exactly-once, and there is no dead-letter topic yet.
+Catalog, inventory, order, and payment publish the facts below from a local outbox table. The business row and the outbox row commit together. A poller sends the JSON after that commit and marks the row published only after the broker acknowledges it. If the process stops between the acknowledgement and that update, the same `eventId` is sent again. Each service stores `(consumer_name, event_id)` in `processed_events` and skips a duplicate. Delivery is at-least-once. This is not exactly-once. A consumer retries a transient failure with exponential backoff for a few seconds, then copies the message to `bazaar.dlq`. An invalid payload or a business rejection is not retried. An outbox row that still cannot be published after 5 attempts becomes `DEAD` and stays in that service's database.
 
 Checkout is a saga. The HTTP call stores the order and returns `PENDING_INVENTORY`. The order service sends commands. Inventory and payment reply with events. The order changes state only when the reply matches the step it is in.
 
@@ -34,6 +34,7 @@ A new required field needs a new `eventVersion`. Adding an optional field does n
 | `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service` |
 | `bazaar.inventory.commands` | order id or reservation id | 3 | 1 | order service | inventory group `inventory-commands` |
 | `bazaar.payment.commands` | order id or payment id | 3 | 1 | order service | payment group `payment-commands` |
+| `bazaar.dlq` | original key | 3 | 1 | the consumer that gave up | no business consumer |
 
 Commands, when they arrive, use a separate topic. They are requests. Events are facts that already happened. Local retention is one hour and 64 MB. That is not a production retention policy.
 
@@ -82,3 +83,11 @@ Not produced: a stock quantity edit, a draft product create or edit, or a repeat
 ```
 
 Money in a payload is a decimal string. The catalog remains the price authority for checkout.
+
+## Dead letters
+
+`bazaar.dlq` holds messages a consumer could not apply. The value is JSON with `originalTopic`, `eventId`, `correlationId`, `error`, and the original `value`. The notification service also includes `attempts`.
+
+Do not republish a dead letter until the business state has been checked. If `processed_events` already has that `eventId`, the consumer will ignore a second copy. If it does not, republish only the original value to `originalTopic`, with the same key. That preserves the idempotency key.
+
+An outbox row in `DEAD` was never acknowledged by the broker. Read `last_error`, `event_id`, and `correlation_id` before touching it. If the business row still wants that fact, set `status` back to `PENDING`, `retry_count` to 0, and `next_attempt_at` to null for that one `event_id`. Do not insert a second event id for the same fact.

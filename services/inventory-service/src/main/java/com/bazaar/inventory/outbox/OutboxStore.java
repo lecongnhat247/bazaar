@@ -48,13 +48,16 @@ public class OutboxStore {
     }
 
     @Transactional
-    public int recoverStale(Instant claimedBefore) {
+    public int recoverStale(Instant claimedBefore, int maxAttempts, Instant retryAt) {
         return jdbc.update("""
                 UPDATE outbox
-                SET status = 'PENDING', claimed_at = NULL, retry_count = retry_count + 1,
-                    last_error = 'publication was interrupted'
+                SET retry_count = retry_count + 1,
+                    last_error = 'publication was interrupted',
+                    claimed_at = NULL,
+                    status = CASE WHEN retry_count + 1 >= ? THEN 'DEAD' ELSE 'PENDING' END,
+                    next_attempt_at = CASE WHEN retry_count + 1 >= ? THEN NULL ELSE ?::timestamptz END
                 WHERE status = 'SENDING' AND claimed_at < ?
-                """, Timestamp.from(claimedBefore));
+                """, maxAttempts, maxAttempts, Timestamp.from(retryAt), Timestamp.from(claimedBefore));
     }
 
     @Transactional
@@ -64,6 +67,7 @@ public class OutboxStore {
                     SELECT id
                     FROM outbox
                     WHERE status = 'PENDING'
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
                     ORDER BY occurred_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT ?
@@ -75,7 +79,7 @@ public class OutboxStore {
                 RETURNING message.id, message.event_id, message.aggregate_type, message.aggregate_id,
                           message.event_type, message.event_version, message.correlation_id, message.causation_id,
                           message.payload::text, message.occurred_at, message.retry_count
-                """, this::message, batchSize, Timestamp.from(now));
+                """, this::message, Timestamp.from(now), batchSize, Timestamp.from(now));
     }
 
     public void markPublished(UUID id, Instant now) {
@@ -86,17 +90,29 @@ public class OutboxStore {
                 """, Timestamp.from(now), id);
     }
 
-    public void markFailed(UUID id, String error) {
-        jdbc.update("""
+    public String markFailed(UUID id, String error, int maxAttempts, Instant retryAt) {
+        return jdbc.queryForObject("""
                 UPDATE outbox
-                SET status = 'PENDING', claimed_at = NULL, retry_count = retry_count + 1, last_error = ?
+                SET retry_count = retry_count + 1,
+                    last_error = ?,
+                    claimed_at = NULL,
+                    status = CASE WHEN retry_count + 1 >= ? THEN 'DEAD' ELSE 'PENDING' END,
+                    next_attempt_at = CASE WHEN retry_count + 1 >= ? THEN NULL ELSE ?::timestamptz END
                 WHERE id = ?
-                """, trim(error), id);
+                RETURNING status
+                """, String.class, trim(error), maxAttempts, maxAttempts, Timestamp.from(retryAt), id);
     }
 
     public int pending() {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM outbox WHERE status IN ('PENDING', 'SENDING')",
+                Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    public int dead() {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'DEAD'",
                 Integer.class);
         return count == null ? 0 : count;
     }

@@ -2,7 +2,7 @@
 
 Owns categories, products, image metadata, and flexible product attributes. Stock quantities belong to the inventory service. Keycloak issues tokens. This service checks the seller id from the token, not from the request body.
 
-Publishing a product writes `catalog.product-published`. Leaving `ACTIVE` writes `catalog.product-unpublished`. Updating an `ACTIVE` product writes `catalog.product-updated`. A draft create or draft edit writes nothing. The outbox row is in the same transaction, then the poller publishes `bazaar.catalog.events`. A duplicate `eventId` is applied once. Readiness does not include Kafka.
+Publishing a product writes `catalog.product-published`. Leaving `ACTIVE` writes `catalog.product-unpublished`. Updating an `ACTIVE` product writes `catalog.product-updated`. A draft create or draft edit writes nothing. The outbox row is in the same transaction, then the poller publishes `bazaar.catalog.events`. A duplicate `eventId` is applied once. A message that still fails is copied to `bazaar.dlq`. Readiness does not include Kafka.
 
 ## Requirements
 
