@@ -60,12 +60,15 @@ docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server loca
 
 The broker health check is its own command. Readiness stays `/actuator/health/readiness` and does not include Kafka. Broker status is `GET /actuator/health/kafka` on catalog, inventory, order, and payment. Each of those services logs `bazaar.kafka.consumer.lag` every 30 seconds. `bazaar.outbox.pending` and `bazaar.outbox.dead` are Micrometer gauges. They are not a separate monitoring stack.
 
-A small k6 smoke lives in `infrastructure/k6`. It is for this machine, not a capacity claim. From the repository root, with Compose already up:
+A small k6 smoke lives in `infrastructure/k6`. The Phase 4 M2 baseline is `infrastructure/k6/baseline.js`. Both are for this machine, not a capacity claim. The measured report is [the M2 baseline](../performance/m2-baseline.md). From the repository root, with Compose already up:
 
 ```bash
 export MSYS_NO_PATHCONV=1
 docker run --rm -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/catalog.js
+docker run --rm -e RUN_ID=a -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/baseline.js
 ```
+
+Use a new `RUN_ID` for each baseline run. A repeated id replays the same checkout idempotency keys. `ONLY=checkout` runs only the normal and concurrent checkout scenarios.
 
 Redis keeps a 64 MB cache with no disk snapshot. Catalog and the gateway read `REDIS_HOST`. Neither waits for Redis before serving HTTP, and readiness does not include Redis. A restart drops cached pages and rate-limit counters. PostgreSQL remains the catalog source of truth. The notification service can use the same Redis to share socket rooms across instances. Its notices stay in PostgreSQL.
 

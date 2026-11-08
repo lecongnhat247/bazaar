@@ -30,6 +30,8 @@ Phase 3 adds one local KRaft broker and one local Redis. Checkout accepts the or
 
 Phase 4 M1 adds Prometheus and Grafana beside Compose. Java services expose Prometheus metrics and continue a W3C trace through HTTP and the outbox. The notification service exposes its own metrics and writes JSON logs with the same trace id. Grafana shows eight dashboards. There is no separate trace store. Flash Sale is still later.
 
+Phase 4 M2 records a small k6 baseline on this laptop. The report is [the M2 baseline](../performance/m2-baseline.md). It does not change checkout, the outbox, or inventory reservation, and it is not a capacity claim.
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.
