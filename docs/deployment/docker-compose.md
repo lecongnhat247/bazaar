@@ -16,12 +16,13 @@ Compose runs the local stack on one Docker network named `bazaar`. Kubernetes us
 | `postgres:17.11-alpine` | PostgreSQL 17.11 | 5432 | 5432 |
 | `quay.io/keycloak/keycloak:26.8.1` | Keycloak 26.8.1 | 8088 | 8080 |
 | `apache/kafka:4.1.1` | Kafka 4.1.1 in KRaft | 9092 | 9092 and 19092 |
+| `redis:8.10.3-alpine` | Redis 8.10.3 | 6379 | 6379 |
 
 Java images are built with `eclipse-temurin:25.0.5_8-jdk-noble` and run on the JRE image. The runtime user is `bazaar` (uid 1001). The storefront runs as the image's `node` user. `curl` is installed in the Java runtime only so the readiness probe can run. It is not used to build the application.
 
 Addresses are set in `docker-compose.yml`. Nothing environment-specific is copied into the image. Database and Keycloak passwords in that file are local development values.
 
-Inside the network the gateway calls `http://<service>:8080`. The storefront server reads `API_GATEWAY_URL=http://api-gateway:8080`. Each Java container is limited to 512 MB, Postgres to 512 MB, Keycloak to 768 MB, Kafka to 768 MB, the topic init container to 256 MB, and the storefront to 384 MB. Stop the kind cluster before starting Compose. The Docker Desktop VM is about 7.6 GiB.
+Inside the network the gateway calls `http://<service>:8080`. The storefront server reads `API_GATEWAY_URL=http://api-gateway:8080`. Each Java container is limited to 512 MB, Postgres to 512 MB, Keycloak to 768 MB, Kafka to 768 MB, the topic init container to 256 MB, Redis to 128 MB, and the storefront to 384 MB. Stop the kind cluster before starting Compose. The Docker Desktop VM is about 7.6 GiB.
 
 ## Start and stop
 
@@ -52,6 +53,8 @@ docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server loca
 ```
 
 The broker health check is its own command. Readiness stays `/actuator/health/readiness` and does not include Kafka. Broker status is `GET /actuator/health/kafka` on catalog, inventory, order, and payment.
+
+Redis keeps a 64 MB cache with no disk snapshot. Catalog and the gateway read `REDIS_HOST`. Neither waits for Redis before serving HTTP, and readiness does not include Redis. A restart drops cached pages and rate-limit counters. PostgreSQL remains the catalog source of truth.
 
 ## Postgres and Keycloak
 

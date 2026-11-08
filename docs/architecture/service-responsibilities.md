@@ -8,7 +8,7 @@ Phase 1 responsibilities are operational. Each service starts, reports health, a
 | --- | --- |
 | Technology | Spring Cloud Gateway on Spring Boot |
 | Port | 8080 |
-| Data | None |
+| Data | Redis for rate-limit counters only. No database. |
 
 Phase 1:
 
@@ -18,7 +18,7 @@ Phase 1:
 - Expose Actuator health, including liveness and readiness.
 - Log in a structured console format and shut down gracefully.
 
-The gateway does not validate tokens, limit rates, or implement marketplace rules. It forwards the `Authorization` header. Each business service checks the JWT.
+The gateway forwards the `Authorization` header and does not decide whether a token may call a service. Each business service checks the JWT. For rate limits, a signature-valid token is counted against a hash of its subject. A missing or invalid token is counted against a hash of the caller address. Reads and writes have separate limits, and each route group has its own counter. Redis is not the source of those decisions: if Redis does not answer, the gateway allows the request. Readiness does not include Redis.
 
 ## Identity Service
 
@@ -45,6 +45,8 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/catalog/info`. Both stay
 Phase 2 stores categories, products, image metadata, and flexible attributes in JSONB. A public product read returns `ACTIVE` products only. A seller creates a product as `DRAFT` and publishes it with a status change. The seller id comes from the token. Stock quantities stay in inventory. There is no product variant in this milestone.
 
 A status change into or out of `ACTIVE`, and an update of an `ACTIVE` product, inserts `bazaar.catalog.events` into the catalog outbox in the same transaction. Creating or editing a draft does not. Readiness does not include Kafka.
+
+Public product detail, the default first page of active products, and the default category page can be served from Redis for 60 seconds. Search text, price filters, later pages, and a seller's own list are not cached. A product event drops the cached product and the cached lists. `Bazaar-Read-Source: database` skips the cache; checkout sends that header so the price comes from PostgreSQL. If Redis is down, the catalog reads the database and still answers. Redis is not part of readiness.
 
 ## Inventory Service
 

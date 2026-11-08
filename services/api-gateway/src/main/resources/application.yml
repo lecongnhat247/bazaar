@@ -3,6 +3,12 @@ spring:
     name: api-gateway
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+      connect-timeout: 200ms
   cloud:
     gateway:
       server:
@@ -64,8 +70,23 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,ping
 
 logging:
   structured:
     format:
       console: ecs
+
+bazaar:
+  security:
+    jwt:
+      remote: true
+      issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8088/realms/bazaar}
+      jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8088/realms/bazaar/protocol/openid-connect/certs}
+  gateway:
+    rate-limit:
+      read-limit: ${RATE_LIMIT_READ:120}
+      write-limit: ${RATE_LIMIT_WRITE:30}
+      window: ${RATE_LIMIT_WINDOW:60s}

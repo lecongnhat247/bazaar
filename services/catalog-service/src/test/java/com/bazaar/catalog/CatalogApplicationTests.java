@@ -34,6 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -46,8 +47,11 @@ import com.bazaar.catalog.outbox.OutboxPublisher;
 class CatalogApplicationTests {
 
     private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.1");
+    private static final GenericContainer<?> REDIS = new GenericContainer<>("redis:8.10.3-alpine")
+            .withExposedPorts(6379);
 
     static {
+        REDIS.start();
         KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR", "1");
         KAFKA.withEnv("KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR", "1");
         KAFKA.start();
@@ -68,10 +72,15 @@ class CatalogApplicationTests {
     @Autowired
     private ServiceEventConsumer events;
 
+    @Autowired
+    private tools.jackson.databind.ObjectMapper objectMapper;
+
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.kafka.listener.auto-startup", () -> "true");
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     }
 
     @Test
@@ -325,6 +334,75 @@ class CatalogApplicationTests {
         outbox.publishPending();
         Thread.sleep(1000);
         assertThat(processed(id)).isEqualTo(3);
+    }
+
+    @Test
+    void publicCatalogReadsUseCacheUntilTheProductEventArrives() throws Exception {
+        String lamp = "8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1001";
+        UUID lampId = UUID.fromString(lamp);
+        try {
+            mockMvc.perform(get("/api/v1/products/" + lamp))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Desk lamp"));
+            mockMvc.perform(get("/api/v1/products"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(2));
+
+            jdbc.update("UPDATE product SET name = ? WHERE id = ?", "Cached lamp", lampId);
+
+            mockMvc.perform(get("/api/v1/products/" + lamp))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Desk lamp"));
+            String listing = mockMvc.perform(get("/api/v1/products"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            assertThat(listing).contains("Desk lamp").doesNotContain("Cached lamp");
+            mockMvc.perform(get("/api/v1/products/" + lamp).header("Bazaar-Read-Source", "database"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Cached lamp"));
+            mockMvc.perform(get("/api/v1/products").param("q", "Cached"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(1));
+
+            events.onEvent(productEvent(lamp, "catalog.product-updated"));
+            mockMvc.perform(get("/api/v1/products/" + lamp))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Cached lamp"));
+            mockMvc.perform(get("/api/v1/products").param("q", "no-such-search-term"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(0));
+        } finally {
+            jdbc.update("UPDATE product SET name = ? WHERE id = ?", "Desk lamp", lampId);
+            events.onEvent(productEvent(lamp, "catalog.product-updated"));
+        }
+    }
+
+    @Test
+    void catalogCacheMissesWhenRedisIsDown() {
+        try (GenericContainer<?> down = new GenericContainer<>("redis:8.10.3-alpine").withExposedPorts(6379)) {
+            down.start();
+            var client = org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration.builder()
+                    .commandTimeout(java.time.Duration.ofMillis(200))
+                    .build();
+            var standalone = new org.springframework.data.redis.connection.RedisStandaloneConfiguration(
+                    down.getHost(), down.getMappedPort(6379));
+            var factory = new org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory(standalone, client);
+            factory.afterPropertiesSet();
+            var template = new org.springframework.data.redis.core.StringRedisTemplate(factory);
+            template.afterPropertiesSet();
+            var isolated = new com.bazaar.catalog.cache.CatalogCache(template, objectMapper, java.time.Duration.ofSeconds(30));
+            down.stop();
+            assertThat(isolated.product(UUID.randomUUID())).isNull();
+            factory.destroy();
+        }
+    }
+
+    private static ConsumerRecord<String, String> productEvent(String productId, String eventType) {
+        String eventId = UUID.randomUUID().toString();
+        String body = """
+                {"eventId":"%s","eventType":"%s","eventVersion":1,"aggregateId":"%s","aggregateType":"catalog","occurredAt":"2026-11-08T00:00:00Z","correlationId":"%s","producer":"catalog-service"}
+                """.formatted(eventId, eventType, productId, productId);
+        return new ConsumerRecord<>("bazaar.catalog.events", 0, 0L, productId, body);
     }
 
     private int rows(String aggregateId) {

@@ -26,7 +26,7 @@ Phase 1 left these for later work:
 
 Phase 2 delivers the customer purchase path on one PostgreSQL server and Keycloak. Each business service still has its own database. Checkout is synchronous REST: the order service reads the catalog price, reserves stock, stores the order, and simulates payment. Success commits the reservation. Failure releases it. The storefront keeps the cart in the browser and the access token in an HTTP-only cookie.
 
-Phase 3 adds one local KRaft broker. Checkout accepts the order, then the order service drives inventory and payment with commands. Each step is stored on the order and can be resumed after a restart. Consumers ignore a repeated `eventId`. Redis, a real payment provider, WebSocket, and the extra frontends are still later. The kind chart does not run Postgres, Keycloak, or Kafka.
+Phase 3 adds one local KRaft broker and one local Redis. Checkout accepts the order, then the order service drives inventory and payment with commands. Each step is stored on the order and can be resumed after a restart. Consumers ignore a repeated `eventId`. The catalog can answer a public product or category read from Redis, and drops that entry when the product event is consumed. Checkout still reads the product price from the catalog database. The gateway counts requests in Redis and keeps serving if Redis is down. A real payment provider, WebSocket, and the extra frontends are still later. The kind chart does not run Postgres, Keycloak, Kafka, or Redis.
 
 ## Principles
 

@@ -13,6 +13,12 @@ spring:
       ddl-auto: none
   flyway:
     enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+      connect-timeout: 200ms
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     client-id: catalog-service
@@ -59,6 +65,7 @@ logging:
 bazaar:
   catalog:
     events-topic: ${CATALOG_EVENTS_TOPIC:bazaar.catalog.events}
+    cache-ttl: ${CATALOG_CACHE_TTL:60s}
   security:
     jwt:
       remote: true

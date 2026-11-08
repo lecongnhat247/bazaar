@@ -36,6 +36,7 @@ class DownstreamClient {
     CatalogProduct product(UUID id) {
         return call(() -> catalog.get()
                 .uri("/api/v1/products/{id}", id)
+                .header("Bazaar-Read-Source", "database")
                 .headers(this::forwardAuthorization)
                 .retrieve()
                 .body(CatalogProduct.class));

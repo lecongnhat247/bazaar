@@ -7,6 +7,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bazaar.catalog.cache.CatalogCache;
 import com.bazaar.catalog.outbox.ProcessedEvents;
 
 import tools.jackson.databind.ObjectMapper;
@@ -18,10 +19,12 @@ public class ServiceEventConsumer {
 
     private final ObjectMapper objectMapper;
     private final ProcessedEvents processed;
+    private final CatalogCache cache;
 
-    public ServiceEventConsumer(ObjectMapper objectMapper, ProcessedEvents processed) {
+    public ServiceEventConsumer(ObjectMapper objectMapper, ProcessedEvents processed, CatalogCache cache) {
         this.objectMapper = objectMapper;
         this.processed = processed;
+        this.cache = cache;
     }
 
     @KafkaListener(topics = "${bazaar.catalog.events-topic}", groupId = "catalog-service")
@@ -31,6 +34,10 @@ public class ServiceEventConsumer {
         EventRules.require(event);
         if (!event.aggregateId().equals(record.key())) {
             throw new IllegalArgumentException("Kafka key must be the aggregate id.");
+        }
+        if (event.eventType().startsWith("catalog.product-")) {
+            cache.evictProduct(event.aggregateId());
+            cache.evictLists();
         }
         if (!processed.record("catalog-service", event)) {
             log.info("Duplicate event ignored eventId={}", event.eventId());

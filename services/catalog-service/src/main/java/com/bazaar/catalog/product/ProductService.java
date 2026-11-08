@@ -19,9 +19,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.bazaar.catalog.api.ImageRequest;
+import com.bazaar.catalog.cache.CatalogCache;
 import com.bazaar.catalog.api.PageResponse;
 import com.bazaar.catalog.api.ProductRequest;
 import com.bazaar.catalog.api.ProductResponse;
@@ -45,11 +48,17 @@ public class ProductService {
     private final ProductRepository products;
     private final CategoryRepository categories;
     private final OutboxStore outbox;
+    private final CatalogCache cache;
 
-    public ProductService(ProductRepository products, CategoryRepository categories, OutboxStore outbox) {
+    public ProductService(
+            ProductRepository products,
+            CategoryRepository categories,
+            OutboxStore outbox,
+            CatalogCache cache) {
         this.products = products;
         this.categories = categories;
         this.outbox = outbox;
+        this.cache = cache;
     }
 
     @Transactional
@@ -89,6 +98,7 @@ public class ProductService {
         if (saved.getStatus() == ProductStatus.ACTIVE) {
             catalogEvent("catalog.product-updated", saved);
         }
+        evictAfterCommit(saved.getId());
         return ProductResponse.from(saved);
     }
 
@@ -106,11 +116,18 @@ public class ProductService {
         } else if (previous == ProductStatus.ACTIVE && status != ProductStatus.ACTIVE) {
             catalogEvent("catalog.product-unpublished", product);
         }
+        evictAfterCommit(product.getId());
         return ProductResponse.from(product);
     }
 
     @Transactional(readOnly = true)
-    public ProductResponse get(Jwt jwt, UUID id) {
+    public ProductResponse get(Jwt jwt, UUID id, boolean database) {
+        if (!database) {
+            ProductResponse cached = cache.product(id);
+            if (cached != null && cached.status() == ProductStatus.ACTIVE) {
+                return cached;
+            }
+        }
         CatalogAccess access = CatalogAccess.from(jwt);
         Product product = products.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found."));
@@ -118,7 +135,11 @@ public class ProductService {
         if (product.getStatus() != ProductStatus.ACTIVE && !access.admin() && !owner) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found.");
         }
-        return ProductResponse.from(product);
+        ProductResponse response = ProductResponse.from(product);
+        if (!database) {
+            cache.putProduct(response);
+        }
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -139,15 +160,26 @@ public class ProductService {
         if (property == null || !DIRECTIONS.contains(search.direction())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sort is invalid");
         }
+        String listKey = access.admin() ? null : cache.publicListKey(search);
+        if (listKey != null) {
+            PageResponse<ProductResponse> cached = cache.list(listKey);
+            if (cached != null) {
+                return cached;
+            }
+        }
         Sort.Direction direction = "asc".equals(search.direction()) ? Sort.Direction.ASC : Sort.Direction.DESC;
         Page<Product> page = products.findAll(specification(access, search, status), PageRequest.of(
                 search.page(), search.size(), Sort.by(direction, property)));
-        return new PageResponse<>(
+        PageResponse<ProductResponse> response = new PageResponse<>(
                 page.getContent().stream().map(ProductResponse::from).toList(),
                 page.getNumber(),
                 page.getSize(),
                 page.getTotalElements(),
                 page.getTotalPages());
+        if (listKey != null) {
+            cache.putList(listKey, response);
+        }
+        return response;
     }
 
     private Specification<Product> specification(CatalogAccess access, ProductSearch search, ProductStatus status) {
@@ -190,6 +222,21 @@ public class ProductService {
 
     private static boolean canSeeNonActive(CatalogAccess access, ProductSearch search) {
         return access.admin() || (search.mine() && access.seller());
+    }
+
+    private void evictAfterCommit(UUID productId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            cache.evictProduct(productId.toString());
+            cache.evictLists();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                cache.evictProduct(productId.toString());
+                cache.evictLists();
+            }
+        });
     }
 
     private void catalogEvent(String eventType, Product product) {

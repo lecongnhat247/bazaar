@@ -65,6 +65,10 @@ services:
     environment:
       SERVER_PORT: "8080"
       CORS_ALLOWED_ORIGINS: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KEYCLOAK_ISSUER_URI: http://localhost:8088/realms/bazaar
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
       IDENTITY_SERVICE_URL: http://identity-service:8080
       CATALOG_SERVICE_URL: http://catalog-service:8080
       INVENTORY_SERVICE_URL: http://inventory-service:8080
@@ -125,6 +129,8 @@ services:
       KEYCLOAK_ISSUER_URI: http://localhost:8088/realms/bazaar
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     depends_on:
       postgres:
         condition: service_healthy
@@ -234,6 +240,21 @@ services:
       api-gateway:
         condition: service_healthy
     mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  redis:
+    image: redis:8.10.3-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 128m
     restart: unless-stopped
     networks:
       - bazaar
