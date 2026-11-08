@@ -18,10 +18,12 @@ public class InventoryTransactions {
 
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
+    private final InventoryMetrics metrics;
 
-    InventoryTransactions(JdbcTemplate jdbc, OutboxStore outbox) {
+    InventoryTransactions(JdbcTemplate jdbc, OutboxStore outbox, InventoryMetrics metrics) {
         this.jdbc = jdbc;
         this.outbox = outbox;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -96,6 +98,7 @@ public class InventoryTransactions {
                 expired++;
             }
         }
+        metrics.expired(expired);
         return expired;
     }
 

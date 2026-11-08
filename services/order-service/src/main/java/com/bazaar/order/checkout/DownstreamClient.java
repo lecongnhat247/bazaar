@@ -12,6 +12,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.slf4j.MDC;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -37,7 +38,7 @@ class DownstreamClient {
         return call(() -> catalog.get()
                 .uri("/api/v1/products/{id}", id)
                 .header("Bazaar-Read-Source", "database")
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .retrieve()
                 .body(CatalogProduct.class));
     }
@@ -46,7 +47,7 @@ class DownstreamClient {
         return call(() -> inventory.post()
                 .uri("/api/v1/inventory/reservations")
                 .header("Idempotency-Key", key)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .body(new ReserveBody(productId, quantity))
                 .retrieve()
                 .body(StockHold.class));
@@ -55,7 +56,7 @@ class DownstreamClient {
     void commit(UUID reservationId) {
         call(() -> inventory.post()
                 .uri("/api/v1/inventory/reservations/{id}/commit", reservationId)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .retrieve()
                 .toBodilessEntity());
     }
@@ -63,7 +64,7 @@ class DownstreamClient {
     void release(UUID reservationId) {
         call(() -> inventory.post()
                 .uri("/api/v1/inventory/reservations/{id}/release", reservationId)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .retrieve()
                 .toBodilessEntity());
     }
@@ -72,7 +73,7 @@ class DownstreamClient {
         return call(() -> payment.post()
                 .uri("/api/v1/payments")
                 .header("Idempotency-Key", key)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .body(new PaymentBody(orderId, amount, currency))
                 .retrieve()
                 .body(PaymentState.class));
@@ -82,7 +83,7 @@ class DownstreamClient {
         String action = "SUCCESS".equals(outcome) ? "simulate-success" : "simulate-failure";
         return call(() -> payment.post()
                 .uri("/api/v1/payments/{id}/{action}", paymentId, action)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .retrieve()
                 .body(PaymentState.class));
     }
@@ -90,16 +91,26 @@ class DownstreamClient {
     void cancelPayment(UUID paymentId) {
         call(() -> payment.post()
                 .uri("/api/v1/payments/{id}/cancel", paymentId)
-                .headers(this::forwardAuthorization)
+                .headers(this::forwardContext)
                 .retrieve()
                 .toBodilessEntity());
     }
 
-    private void forwardAuthorization(HttpHeaders headers) {
+    private void forwardContext(HttpHeaders headers) {
         if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
             String authorization = attributes.getRequest().getHeader(HttpHeaders.AUTHORIZATION);
             if (authorization != null && !authorization.isBlank()) {
                 headers.set(HttpHeaders.AUTHORIZATION, authorization);
+            }
+            String correlationId = attributes.getRequest().getHeader("X-Correlation-Id");
+            if (correlationId != null && correlationId.matches("[A-Za-z0-9._:-]{8,80}")) {
+                headers.set("X-Correlation-Id", correlationId);
+            }
+        }
+        if (!headers.containsHeader("X-Correlation-Id")) {
+            String correlationId = MDC.get("correlationId");
+            if (correlationId != null && correlationId.matches("[A-Za-z0-9._:-]{8,80}")) {
+                headers.set("X-Correlation-Id", correlationId);
             }
         }
     }

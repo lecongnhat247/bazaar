@@ -20,14 +20,17 @@ import org.springframework.web.server.ResponseStatusException;
 public class InventoryService {
 
     private final InventoryTransactions transactions;
+    private final InventoryMetrics metrics;
     private final Clock clock;
     private final Duration ttl;
 
     public InventoryService(
             InventoryTransactions transactions,
+            InventoryMetrics metrics,
             Clock clock,
             @Value("${bazaar.inventory.reservation-ttl:PT15M}") Duration ttl) {
         this.transactions = transactions;
+        this.metrics = metrics;
         this.clock = clock;
         this.ttl = ttl;
     }
@@ -62,9 +65,21 @@ public class InventoryService {
         transactions.expireDue(clock.instant());
         Instant now = clock.instant();
         try {
-            return transactions.reserve(access, key, hash, productId, quantity, now, now.plus(ttl));
+            ReserveOutcome outcome = transactions.reserve(access, key, hash, productId, quantity, now, now.plus(ttl));
+            if (outcome.created()) {
+                metrics.reserved();
+            } else {
+                metrics.replay();
+            }
+            return outcome;
         } catch (DataIntegrityViolationException conflict) {
+            metrics.replay();
             return new ReserveOutcome(transactions.replay(access, key, hash), false);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() == 409) {
+                metrics.rejected();
+            }
+            throw exception;
         }
     }
 

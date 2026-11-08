@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.bazaar.inventory.outbox.OutboxStore;
 import com.bazaar.inventory.outbox.ProcessedEvents;
+import com.bazaar.inventory.stock.InventoryMetrics;
 import com.bazaar.inventory.stock.InventoryTransactions;
 import com.bazaar.inventory.stock.InventoryTransactions.Requested;
 import com.bazaar.inventory.stock.StockShortException;
@@ -29,6 +30,7 @@ public class CommandConsumer {
     private final ProcessedEvents processed;
     private final InventoryTransactions transactions;
     private final OutboxStore outbox;
+    private final InventoryMetrics metrics;
     private final Clock clock;
     private final Duration ttl;
 
@@ -37,12 +39,14 @@ public class CommandConsumer {
             ProcessedEvents processed,
             InventoryTransactions transactions,
             OutboxStore outbox,
+            InventoryMetrics metrics,
             Clock clock,
             @Value("${bazaar.inventory.reservation-ttl:PT15M}") Duration ttl) {
         this.objectMapper = objectMapper;
         this.processed = processed;
         this.transactions = transactions;
         this.outbox = outbox;
+        this.metrics = metrics;
         this.clock = clock;
         this.ttl = ttl;
     }
@@ -77,7 +81,9 @@ public class CommandConsumer {
         }
         try {
             transactions.reserveForSaga(orderId, customerId, items, now, now.plus(ttl));
+            metrics.reserved();
         } catch (StockShortException exception) {
+            metrics.rejected();
             outbox.add("inventory.reservation-failed", "inventory", orderId.toString(), orderId, java.util.Map.of(
                     "orderId", orderId.toString(),
                     "reason", exception.getMessage()), now);

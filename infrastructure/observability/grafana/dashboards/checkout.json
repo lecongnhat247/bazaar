@@ -1,0 +1,52 @@
+{
+  "uid": "bazaar-checkout",
+  "title": "BAZAAR Checkout and Saga",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Checkout attempts",
+      "description": "Every checkout call, including replays and rejections. Accepted means the order was saved as PENDING_INVENTORY. It does not mean the saga has confirmed the order.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        { "expr": "sum(rate(bazaar_checkout_attempts_total[5m]))", "legendFormat": "attempts", "refId": "A" },
+        { "expr": "sum by (result) (rate(bazaar_checkout_results_total[5m]))", "legendFormat": "{{result}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Saga outcomes",
+      "description": "Orders that reached CONFIRMED, PAYMENT_FAILED, CANCELLED, or FAILED. Intermediate states are in the active gauge, not here.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (outcome) (rate(bazaar_saga_completed_total[5m]))", "legendFormat": "{{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active sagas",
+      "description": "Orders whose saga is not finished. A number that grows while Kafka lag grows means commands are not being applied.",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "bazaar_saga_active", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Payment results",
+      "description": "Payment rows that changed to succeeded, failed, cancelled, or refunded. A replay of the same result does not increment this.",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (result) (rate(bazaar_payment_results_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }]
+    }
+  ]
+}

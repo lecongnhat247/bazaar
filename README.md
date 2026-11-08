@@ -40,6 +40,13 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M6 | Reliability and testing | Complete |
 | M7 | Integration | Complete |
 
+## Phase 4
+
+| Milestone | Scope | Status |
+| --- | --- | --- |
+| M0 | Phase 3 audit | Complete |
+| M1 | Observability foundation | Complete |
+
 ## Documentation
 
 - [Architecture overview](docs/architecture/overview.md)
@@ -50,6 +57,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [Development setup](docs/development/setup.md)
 - [Deployment overview](docs/deployment/overview.md)
 - [Docker Compose](docs/deployment/docker-compose.md)
+- [Observability](infrastructure/observability/README.md)
 - [kind and Helm](docs/deployment/kubernetes-kind.md)
 - [Remote Kubernetes](docs/deployment/remote-kubernetes.md)
 - [GitHub Actions and GHCR](docs/deployment/github-actions.md)

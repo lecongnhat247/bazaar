@@ -21,6 +21,7 @@ class OrderTransactions {
 
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
+    private final CheckoutMetrics metrics;
     private final String orderTopic;
     private final String inventoryCommands;
     private final String paymentCommands;
@@ -28,11 +29,13 @@ class OrderTransactions {
     OrderTransactions(
             JdbcTemplate jdbc,
             OutboxStore outbox,
+            CheckoutMetrics metrics,
             @Value("${bazaar.order.events-topic}") String orderTopic,
             @Value("${bazaar.order.inventory-commands-topic}") String inventoryCommands,
             @Value("${bazaar.order.payment-commands-topic}") String paymentCommands) {
         this.jdbc = jdbc;
         this.outbox = outbox;
+        this.metrics = metrics;
         this.orderTopic = orderTopic;
         this.inventoryCommands = inventoryCommands;
         this.paymentCommands = paymentCommands;
@@ -523,6 +526,7 @@ class OrderTransactions {
             return false;
         }
         history(orderId, to, nextSeq(orderId), now);
+        metrics.complete(to);
         String type = eventType(to);
         if (type != null) {
             fact(orderId, type, to, now);

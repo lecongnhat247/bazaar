@@ -4,13 +4,14 @@ import { CustomerGuard } from "./auth/customer.guard";
 import { TokenVerifier } from "./auth/token-verifier";
 import { KafkaConsumer } from "./events/kafka.consumer";
 import { HealthController } from "./health.controller";
+import { MetricsController } from "./metrics";
 import { NotificationService } from "./notifications/notification.service";
 import { MemoryNotificationStore, NotificationStore, PgNotificationStore } from "./notifications/notification.store";
 import { NotificationsController } from "./notifications/notifications.controller";
 import { NotificationsGateway } from "./realtime/notifications.gateway";
 
 @Module({
-  controllers: [HealthController, NotificationsController],
+  controllers: [HealthController, NotificationsController, MetricsController],
   providers: [
     TokenVerifier,
     CustomerGuard,

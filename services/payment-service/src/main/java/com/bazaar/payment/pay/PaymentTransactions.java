@@ -14,15 +14,26 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.bazaar.payment.outbox.OutboxStore;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Service
 public class PaymentTransactions {
 
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
+    private final Counter succeeded;
+    private final Counter failed;
+    private final Counter cancelled;
+    private final Counter refunded;
 
-    PaymentTransactions(JdbcTemplate jdbc, OutboxStore outbox) {
+    PaymentTransactions(JdbcTemplate jdbc, OutboxStore outbox, MeterRegistry meters) {
         this.jdbc = jdbc;
         this.outbox = outbox;
+        this.succeeded = meters.counter("bazaar.payment.results", "result", "succeeded");
+        this.failed = meters.counter("bazaar.payment.results", "result", "failed");
+        this.cancelled = meters.counter("bazaar.payment.results", "result", "cancelled");
+        this.refunded = meters.counter("bazaar.payment.results", "result", "refunded");
     }
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
@@ -87,6 +98,7 @@ public class PaymentTransactions {
                 """, status, Timestamp.from(now), id);
         if (changed == 1) {
             attempt(id, attemptType, status, now);
+            result(status).increment();
             outbox.add(eventType(status), "payment", id.toString(), id, java.util.Map.of(
                     "orderId", current.orderId().toString(),
                     "customerId", current.payerId(),
@@ -120,6 +132,7 @@ public class PaymentTransactions {
                 """, Timestamp.from(now), id);
         if (changed == 1) {
             attempt(id, "REFUND", "REFUNDED", now);
+            refunded.increment();
             outbox.add("payment.refunded", "payment", id.toString(), id, java.util.Map.of(
                     "orderId", current.orderId().toString(),
                     "customerId", current.payerId(),
@@ -128,6 +141,15 @@ public class PaymentTransactions {
                     "status", "REFUNDED"), now);
         }
         return changed == 1;
+    }
+
+    private Counter result(String status) {
+        return switch (status) {
+            case "SUCCEEDED" -> succeeded;
+            case "FAILED" -> failed;
+            case "CANCELLED" -> cancelled;
+            default -> cancelled;
+        };
     }
 
     private static String eventType(String status) {

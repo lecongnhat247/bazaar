@@ -30,41 +30,54 @@ public class CheckoutService {
 
     private final OrderTransactions transactions;
     private final DownstreamClient downstream;
+    private final CheckoutMetrics metrics;
     private final Clock clock;
 
-    public CheckoutService(OrderTransactions transactions, DownstreamClient downstream, Clock clock) {
+    public CheckoutService(OrderTransactions transactions, DownstreamClient downstream, CheckoutMetrics metrics, Clock clock) {
         this.transactions = transactions;
         this.downstream = downstream;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
     public CheckoutOutcome checkout(Jwt jwt, String idempotencyKey, List<CheckoutItem> items, String outcome) {
-        OrderAccess access = access(jwt);
-        String key = validKey(idempotencyKey);
-        List<CheckoutItem> lines = uniqueItems(items);
-        String hash = hash(access.subject(), outcome, lines);
-        OrderRow existing = transactions.findByKey(key);
-        if (existing != null) {
-            return new CheckoutOutcome(replay(access, existing, hash), false);
-        }
-        List<Priced> priced = price(lines);
+        metrics.attempt();
         try {
-            OrderRow created = transactions.insert(
-                    access,
-                    key,
-                    hash,
-                    outcome,
-                    priced.getFirst().product().currency(),
-                    total(priced),
-                    snapshot(priced),
-                    clock.instant());
-            return new CheckoutOutcome(transactions.response(created), true);
-        } catch (DataIntegrityViolationException conflict) {
-            OrderRow winner = transactions.findByKey(key);
-            if (winner == null) {
-                throw conflict;
+            OrderAccess access = access(jwt);
+            String key = validKey(idempotencyKey);
+            List<CheckoutItem> lines = uniqueItems(items);
+            String hash = hash(access.subject(), outcome, lines);
+            OrderRow existing = transactions.findByKey(key);
+            if (existing != null) {
+                CheckoutOutcome replayed = new CheckoutOutcome(replay(access, existing, hash), false);
+                metrics.replay();
+                return replayed;
             }
-            return new CheckoutOutcome(replay(access, winner, hash), false);
+            List<Priced> priced = price(lines);
+            try {
+                OrderRow created = transactions.insert(
+                        access,
+                        key,
+                        hash,
+                        outcome,
+                        priced.getFirst().product().currency(),
+                        total(priced),
+                        snapshot(priced),
+                        clock.instant());
+                metrics.accepted();
+                return new CheckoutOutcome(transactions.response(created), true);
+            } catch (DataIntegrityViolationException conflict) {
+                OrderRow winner = transactions.findByKey(key);
+                if (winner == null) {
+                    throw conflict;
+                }
+                CheckoutOutcome replayed = new CheckoutOutcome(replay(access, winner, hash), false);
+                metrics.replay();
+                return replayed;
+            }
+        } catch (RuntimeException exception) {
+            metrics.rejected();
+            throw exception;
         }
     }
 

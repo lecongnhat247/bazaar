@@ -1,7 +1,10 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from "@nestjs/common";
 import { Admin, Consumer, Kafka, Producer } from "kafkajs";
 
+import { logContext } from "../log";
+import { kafkaDlq, kafkaLag, kafkaProcessed, kafkaRetries } from "../metrics";
 import { NotificationService } from "../notifications/notification.service";
+import { childSpanId, traceIdFromHeader } from "../trace";
 import { backoffMs, failureAction } from "./dead-letter";
 
 const TOPICS = ["bazaar.order.events", "bazaar.payment.events"];
@@ -64,26 +67,34 @@ export class KafkaConsumer implements OnApplicationBootstrap, OnApplicationShutd
             try {
               body = JSON.parse(raw);
             } catch (error) {
-              await this.deadLetter(topic, message.key?.toString() ?? null, "", "", raw, String(error), 1);
+              await this.deadLetter(topic, message.key?.toString() ?? null, "", "", headerText(message.headers?.traceparent), raw, String(error), 1);
               return;
             }
             const eventId = textField(body, "eventId");
             const correlationId = textField(body, "correlationId");
+            const traceparent = headerText(message.headers?.traceparent);
+            const traceId = traceIdFromHeader(traceparent);
             try {
-              await this.notifications.accept(body);
+              await logContext.run(
+                { traceId, spanId: traceId ? childSpanId() : "", correlationId, eventId },
+                () => this.notifications.accept(body),
+              );
+              kafkaProcessed.inc();
               this.attempts.delete(key);
             } catch (error) {
               const attempt = (this.attempts.get(key) ?? 0) + 1;
               this.attempts.set(key, attempt);
               if (failureAction(attempt, false) === "dead") {
-                await this.deadLetter(topic, message.key?.toString() ?? null, eventId, correlationId, raw, String(error), attempt);
+                await this.deadLetter(topic, message.key?.toString() ?? null, eventId, correlationId, traceparent, raw, String(error), attempt);
                 this.attempts.delete(key);
                 return;
               }
+              kafkaRetries.inc();
               this.log.warn(JSON.stringify({
                 message: "Notification event will be retried",
                 eventId,
                 correlationId,
+                traceId,
                 attempt,
                 error: String(error),
               }));
@@ -109,6 +120,7 @@ export class KafkaConsumer implements OnApplicationBootstrap, OnApplicationShutd
     key: string | null,
     eventId: string,
     correlationId: string,
+    traceparent: string,
     value: string,
     error: string,
     attempts: number,
@@ -124,8 +136,16 @@ export class KafkaConsumer implements OnApplicationBootstrap, OnApplicationShutd
     try {
       await this.producer?.send({
         topic: process.env.DLQ_TOPIC ?? "bazaar.dlq",
-        messages: [{ key, value: body }],
+        messages: [{
+          key,
+          value: body,
+          headers: {
+            ...(correlationId ? { correlationId } : {}),
+            ...(traceparent ? { traceparent } : {}),
+          },
+        }],
       });
+      kafkaDlq.inc();
       this.log.error(JSON.stringify({
         message: "Dead letter",
         originalTopic: topic,
@@ -165,11 +185,25 @@ export class KafkaConsumer implements OnApplicationBootstrap, OnApplicationShutd
           }
         }
       }
+      kafkaLag.set(max);
       this.log.log(JSON.stringify({ message: "Kafka consumer lag", group: GROUP, max }));
     } catch (error) {
       this.log.warn(JSON.stringify({ message: "Kafka lag could not be read", error: String(error) }));
     }
   }
+}
+
+function headerText(value: unknown): string {
+  if (!value) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return headerText(value[0]);
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString("utf8");
+  }
+  return typeof value === "string" ? value : "";
 }
 
 function textField(body: unknown, name: string): string {

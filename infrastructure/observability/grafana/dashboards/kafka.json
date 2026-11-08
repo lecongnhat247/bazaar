@@ -1,0 +1,48 @@
+{
+  "uid": "bazaar-kafka",
+  "title": "BAZAAR Kafka",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Consumer lag",
+      "description": "Maximum records-lag-max seen by each Java consumer, plus the notification gauge. The broker exporter series is separate and can show lag per group.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "bazaar_kafka_consumer_lag", "legendFormat": "{{job}}", "refId": "A" },
+        { "expr": "sum by (consumergroup) (kafka_consumergroup_lag)", "legendFormat": "broker {{consumergroup}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Outbox pending and dead",
+      "description": "Pending includes rows waiting to publish and rows currently being sent. Dead rows have used their attempts and stay in PostgreSQL until someone replays that one row.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "bazaar_outbox_pending", "legendFormat": "{{job}} pending", "refId": "A" },
+        { "expr": "bazaar_outbox_dead", "legendFormat": "{{job}} dead", "refId": "B" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Processed, retries, DLQ",
+      "description": "Records a consumer applied, attempts that will be repeated, and records copied to bazaar.dlq. A retry is not yet a lost event.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        { "expr": "sum by (job) (rate(bazaar_kafka_processed_total[5m]))", "legendFormat": "{{job}} processed", "refId": "A" },
+        { "expr": "sum by (job) (rate(bazaar_kafka_retries_total[5m]))", "legendFormat": "{{job}} retry", "refId": "B" },
+        { "expr": "sum by (job) (rate(bazaar_kafka_dlq_total[5m]))", "legendFormat": "{{job}} dlq", "refId": "C" }
+      ]
+    }
+  ]
+}

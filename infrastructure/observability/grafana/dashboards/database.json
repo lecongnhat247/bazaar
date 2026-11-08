@@ -1,0 +1,56 @@
+{
+  "uid": "bazaar-database",
+  "title": "BAZAAR Database",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Pool active",
+      "description": "Hikari connections checked out. If this sits at the pool maximum, new requests wait or fail. Do not add service replicas until this has headroom.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "hikaricp_connections_active", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Pool idle",
+      "description": "Connections available in the pool.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "hikaricp_connections_idle", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Pool pending",
+      "description": "Threads waiting for a connection. A non-zero line means the pool is saturated.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "hikaricp_connections_pending", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Connection acquisition p95",
+      "description": "Time to borrow a connection. Growth here usually means pool exhaustion or a slow database, not a slow query by itself.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (job, le) (rate(hikaricp_connections_acquire_seconds_bucket[5m])))", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Deadlocks",
+      "description": "PostgreSQL deadlocks counted by the database, across every database on this server. The line should stay flat. A step is a deadlock that Postgres already aborted.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (datname) (pg_stat_database_deadlocks)", "legendFormat": "{{datname}}", "refId": "A" }]
+    }
+  ]
+}

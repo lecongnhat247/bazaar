@@ -3,6 +3,7 @@ package com.bazaar.catalog.cache;
 import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,9 @@ import com.bazaar.catalog.api.ProductResponse;
 import com.bazaar.catalog.api.ProductSearch;
 import com.bazaar.catalog.product.ProductStatus;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.ObjectMapper;
 
@@ -31,14 +35,23 @@ public class CatalogCache {
     private final Duration ttl;
     private final JavaType productPage;
     private final JavaType categoryPage;
+    private final Counter hits;
+    private final Counter misses;
+    private final Counter errors;
+    private final Timer reads;
 
     public CatalogCache(
             StringRedisTemplate redis,
             ObjectMapper objectMapper,
+            MeterRegistry meters,
             @Value("${bazaar.catalog.cache-ttl:60s}") Duration ttl) {
         this.redis = redis;
         this.objectMapper = objectMapper;
         this.ttl = ttl;
+        this.hits = meters.counter("bazaar.catalog.cache", "result", "hit");
+        this.misses = meters.counter("bazaar.catalog.cache", "result", "miss");
+        this.errors = meters.counter("bazaar.catalog.cache", "result", "error");
+        this.reads = meters.timer("bazaar.catalog.cache.latency");
         this.productPage = objectMapper.getTypeFactory()
                 .constructParametricType(PageResponse.class, ProductResponse.class);
         this.categoryPage = objectMapper.getTypeFactory()
@@ -124,28 +137,49 @@ public class CatalogCache {
     }
 
     private <T> T read(String key, Class<T> type) {
+        String json = readJson(key);
+        if (json == null) {
+            return null;
+        }
         try {
-            String json = redis.opsForValue().get(key);
-            if (json == null) {
-                return null;
-            }
             return objectMapper.readValue(json, type);
         } catch (RuntimeException exception) {
+            errors.increment();
             log.warn("Catalog cache read skipped: {}", exception.toString());
             return null;
         }
     }
 
     private <T> T read(String key, JavaType type) {
+        String json = readJson(key);
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (RuntimeException exception) {
+            errors.increment();
+            log.warn("Catalog cache read skipped: {}", exception.toString());
+            return null;
+        }
+    }
+
+    private String readJson(String key) {
+        long started = System.nanoTime();
         try {
             String json = redis.opsForValue().get(key);
             if (json == null) {
-                return null;
+                misses.increment();
+            } else {
+                hits.increment();
             }
-            return objectMapper.readValue(json, type);
+            return json;
         } catch (RuntimeException exception) {
+            errors.increment();
             log.warn("Catalog cache read skipped: {}", exception.toString());
             return null;
+        } finally {
+            reads.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 

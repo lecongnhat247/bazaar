@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 
 import { toNotice } from "../events/map-event";
+import { notificationsDelivered, notificationsDuplicate } from "../metrics";
 import { NotificationsGateway } from "../realtime/notifications.gateway";
 import { NotificationStore, StoredNotice } from "./notification.store";
 
@@ -20,15 +21,16 @@ export class NotificationService {
     }
     const saved = await this.store.save(notice);
     if (!saved) {
-      this.log.log(JSON.stringify({ message: "Duplicate notification ignored", eventId: notice.eventId, orderId: notice.orderId }));
+      notificationsDuplicate.inc();
+      this.log.log(JSON.stringify({ message: "Duplicate notification ignored", eventId: notice.eventId }));
       return;
     }
+    notificationsDelivered.inc({ type: notice.type });
     this.realtime.publish(notice);
     this.log.log(JSON.stringify({
       message: "Stored notification",
       eventId: notice.eventId,
       eventType: notice.type,
-      orderId: notice.orderId,
     }));
   }
 

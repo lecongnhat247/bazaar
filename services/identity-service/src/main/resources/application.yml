@@ -22,17 +22,29 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       probes:
         enabled: true
       show-details: never
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        hikaricp.connections.acquire: true
 
 logging:
   structured:
     format:
       console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        environment: ${BAZAAR_ENV:local}
 
 bazaar:
   security:

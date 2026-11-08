@@ -61,7 +61,7 @@ public class OutboxPublisher {
             log.warn("Outbox recovered interrupted publications count={}", interrupted);
         }
         for (OutboxMessage message : store.claim(batchSize, now)) {
-            try {
+            try (TraceContext trace = TraceContext.open(message.traceparent())) {
                 events.publishServiceEvent(envelope(message));
                 store.markPublished(message.id(), Instant.now());
                 published.increment();

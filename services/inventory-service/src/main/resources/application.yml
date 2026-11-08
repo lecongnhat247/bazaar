@@ -20,14 +20,19 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
+      properties:
+        interceptor.classes: com.bazaar.inventory.messaging.TraceProducerInterceptor
     consumer:
       group-id: inventory-service
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    template:
+      observation-enabled: true
     listener:
       auto-startup: false
       missing-topics-fatal: false
+      observation-enabled: true
     admin:
       fail-fast: false
 
@@ -39,7 +44,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       probes:
@@ -50,11 +55,23 @@ management:
           include: readinessState,db,diskSpace,ping
         kafka:
           include: kafkaBroker
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        hikaricp.connections.acquire: true
 
 logging:
   structured:
     format:
       console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        environment: ${BAZAAR_ENV:local}
 
 bazaar:
   inventory:

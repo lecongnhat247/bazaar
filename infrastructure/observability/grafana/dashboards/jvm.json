@@ -1,0 +1,59 @@
+{
+  "uid": "bazaar-jvm",
+  "title": "BAZAAR JVM Services",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Heap",
+      "description": "Used heap. A sawtooth is normal collection. A line that climbs to the container limit and stays there means the service needs a larger limit or fewer retained objects.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Non-heap",
+      "description": "Metaspace, code cache, and other non-heap memory.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "sum by (job) (jvm_memory_used_bytes{area=\"nonheap\"})", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "GC pauses",
+      "description": "Garbage collections per second. A sudden rise with flat request rate points at allocation pressure.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (job) (rate(jvm_gc_pause_seconds_count[5m]))", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Live threads",
+      "description": "JVM threads. This is not the same as HTTP concurrency.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "jvm_threads_live_threads", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "CPU",
+      "description": "Process CPU as a fraction of one core. A value of 1 is one busy core.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [{ "expr": "process_cpu_usage", "legendFormat": "{{job}}", "refId": "A" }]
+    }
+  ]
+}

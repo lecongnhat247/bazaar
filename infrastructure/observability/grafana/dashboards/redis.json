@@ -1,0 +1,58 @@
+{
+  "uid": "bazaar-redis",
+  "title": "BAZAAR Redis",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Redis up",
+      "description": "1 when the catalog service received PONG. 0 when Redis did not answer. Catalog and the gateway keep serving when this is 0.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "bazaar_redis_up", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Exporter up",
+      "description": "1 when Prometheus can scrape the Redis exporter.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "redis_up", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory",
+      "description": "Used Redis memory. The local container caps this at 64 MB and evicts keys. Losing keys drops cache and rate-limit counters. It does not change stock or orders.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "redis_memory_used_bytes", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Catalog cache",
+      "description": "Public catalog reads served from Redis, missed, or skipped because Redis failed. A miss still reads PostgreSQL. Checkout price does not use this cache.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (result) (rate(bazaar_catalog_cache_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Command rate",
+      "description": "Redis commands per second reported by the exporter. This is server load, not cache hit ratio.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum(rate(redis_commands_total[5m]))", "refId": "A" }]
+    }
+  ]
+}

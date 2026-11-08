@@ -1,10 +1,14 @@
 package com.bazaar.inventory.messaging;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+
+import com.bazaar.inventory.outbox.TraceContext;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -31,8 +35,17 @@ public class EventPublisher {
     public void publish(String topic, EventEnvelope event) {
         EventRules.require(event);
         String json = objectMapper.writeValueAsString(event);
+        ProducerRecord<String, String> record = new ProducerRecord<>(topic, event.aggregateId(), json);
+        if (event.correlationId() != null) {
+            record.headers().add("correlationId", event.correlationId().toString().getBytes(StandardCharsets.UTF_8));
+        }
+        String traceparent = TraceContext.current();
+        if (traceparent != null) {
+            record.headers().remove("traceparent");
+            record.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
+        }
         try {
-            kafka.send(topic, event.aggregateId(), json).get(10, TimeUnit.SECONDS);
+            kafka.send(record).get(10, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while publishing " + event.eventId(), exception);

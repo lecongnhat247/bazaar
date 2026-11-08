@@ -390,7 +390,8 @@ class CatalogApplicationTests {
             factory.afterPropertiesSet();
             var template = new org.springframework.data.redis.core.StringRedisTemplate(factory);
             template.afterPropertiesSet();
-            var isolated = new com.bazaar.catalog.cache.CatalogCache(template, objectMapper, java.time.Duration.ofSeconds(30));
+            var isolated = new com.bazaar.catalog.cache.CatalogCache(
+                    template, objectMapper, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), java.time.Duration.ofSeconds(30));
             down.stop();
             assertThat(isolated.product(UUID.randomUUID())).isNull();
             factory.destroy();

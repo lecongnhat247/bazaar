@@ -18,12 +18,17 @@ Compose runs the local stack on one Docker network named `bazaar`. Kubernetes us
 | `quay.io/keycloak/keycloak:26.8.1` | Keycloak 26.8.1 | 8088 | 8080 |
 | `apache/kafka:4.1.1` | Kafka 4.1.1 in KRaft | 9092 | 9092 and 19092 |
 | `redis:8.10.3-alpine` | Redis 8.10.3 | 6379 | 6379 |
+| `prom/prometheus:v3.2.1` | Prometheus | 9090 | 9090 |
+| `grafana/grafana:11.6.0` | Grafana | 3001 | 3000 |
+| `prometheuscommunity/postgres-exporter:v0.17.1` | Postgres exporter | none | 9187 |
+| `danielqsj/kafka-exporter:v1.9.0` | Kafka exporter | none | 9308 |
+| `oliver006/redis_exporter:v1.66.0` | Redis exporter | none | 9121 |
 
 Java images are built with `eclipse-temurin:25.0.5_8-jdk-noble` and run on the JRE image. The runtime user is `bazaar` (uid 1001). The storefront runs as the image's `node` user. `curl` is installed in the Java runtime only so the readiness probe can run. It is not used to build the application.
 
 Addresses are set in `docker-compose.yml`. Nothing environment-specific is copied into the image. Database and Keycloak passwords in that file are local development values.
 
-Inside the network the gateway calls `http://<service>:8080`. The storefront server reads `API_GATEWAY_URL=http://api-gateway:8080` and `NOTIFICATION_URL=http://notification-service:8080`. The browser opens the socket at `NOTIFICATION_PUBLIC_URL` (`http://localhost:8086`). Each Java container is limited to 512 MB, Postgres to 512 MB, Keycloak to 768 MB, Kafka to 768 MB, the topic init container to 256 MB, Redis to 128 MB, the notification database init to 128 MB, and the storefront and notification service to 384 MB each. Stop the kind cluster before starting Compose. The Docker Desktop VM is about 7.6 GiB.
+Inside the network the gateway calls `http://<service>:8080`. The storefront server reads `API_GATEWAY_URL=http://api-gateway:8080` and `NOTIFICATION_URL=http://notification-service:8080`. The browser opens the socket at `NOTIFICATION_PUBLIC_URL` (`http://localhost:8086`). Each Java container is limited to 512 MB, Postgres to 512 MB, Keycloak to 768 MB, Kafka to 768 MB, the topic init container to 256 MB, Redis to 128 MB, the notification database init to 128 MB, and the storefront and notification service to 384 MB each. Prometheus and Grafana are limited to 192 MB each. The Postgres exporter is 64 MB, the Kafka exporter is 64 MB, and the Redis exporter is 48 MB. Stop the kind cluster before starting Compose. The Docker Desktop VM is about 7.6 GiB. Grafana is http://localhost:3001 and Prometheus is http://localhost:9090. The panel guide is [infrastructure/observability/README.md](../../infrastructure/observability/README.md).
 
 ## Start and stop
 

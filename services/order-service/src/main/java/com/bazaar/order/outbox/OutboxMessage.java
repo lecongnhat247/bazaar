@@ -15,5 +15,6 @@ public record OutboxMessage(
         String payload,
         Instant occurredAt,
         int retryCount,
-        String topic) {
+        String topic,
+        String traceparent) {
 }

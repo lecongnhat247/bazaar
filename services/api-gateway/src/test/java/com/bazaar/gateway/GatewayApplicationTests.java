@@ -81,6 +81,15 @@ class GatewayApplicationTests {
     }
 
     @Test
+    void prometheusIsPublic() {
+        webTestClient.get().uri("/actuator/prometheus")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .value(body -> assertThat(body).contains("jvm_memory_used_bytes"));
+    }
+
+    @Test
     void livenessAndReadinessAreUp() {
         webTestClient.get().uri("/actuator/health/liveness")
                 .exchange()

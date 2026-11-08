@@ -19,6 +19,9 @@ import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.util.backoff.ExponentialBackOff;
 
@@ -35,7 +38,10 @@ public class KafkaConfig {
     DefaultErrorHandler kafkaErrorHandler(
             KafkaTemplate<String, String> kafka,
             ObjectMapper objectMapper,
+            MeterRegistry meters,
             @Value("${bazaar.dlq.topic:bazaar.dlq}") String deadLetterTopic) {
+        Counter retries = meters.counter("bazaar.kafka.retries");
+        Counter deadLetters = meters.counter("bazaar.kafka.dlq");
         ConsumerRecordRecoverer recoverer = (ConsumerRecord<?, ?> record, Exception exception) -> {
             String eventId = field(record.value(), "eventId");
             String correlationId = field(record.value(), "correlationId");
@@ -49,6 +55,7 @@ public class KafkaConfig {
                     "value", String.valueOf(record.value())));
             try {
                 kafka.send(deadLetterTopic, record.key() == null ? null : record.key().toString(), body).get(5, TimeUnit.SECONDS);
+                deadLetters.increment();
                 log.error(
                         "Dead letter originalTopic={} eventId={} correlationId={} error={}",
                         record.topic(),
@@ -77,11 +84,14 @@ public class KafkaConfig {
         backOff.setMaxElapsedTime(5_000L);
         DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
         handler.addNotRetryableExceptions(IllegalArgumentException.class, JacksonException.class, DataIntegrityViolationException.class);
-        handler.setRetryListeners((record, exception, attempt) -> log.warn(
-                "Event retry originalTopic={} attempt={} error={}",
-                record.topic(),
-                attempt,
-                exception.toString()));
+        handler.setRetryListeners((record, exception, attempt) -> {
+            retries.increment();
+            log.warn(
+                    "Event retry originalTopic={} attempt={} error={}",
+                    record.topic(),
+                    attempt,
+                    exception.toString());
+        });
         return handler;
     }
 

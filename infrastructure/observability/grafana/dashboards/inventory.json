@@ -1,0 +1,41 @@
+{
+  "uid": "bazaar-inventory",
+  "title": "BAZAAR Inventory and Flash Sale",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Reservations",
+      "description": "reserved is a new hold. replay is the same idempotency key. rejected means the conditional stock update found too little available stock. The database statement still enforces non-negative available stock.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (result) (rate(bazaar_inventory_reservations_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Expired reservations",
+      "description": "Held reservations released because they passed their expiry. The stock returns to available in the same transaction.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum(rate(bazaar_inventory_expired_total[5m]))", "legendFormat": "expired", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "text",
+      "title": "Flash Sale",
+      "description": "Flash Sale admission and rejection counters are not emitted yet.",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 8 },
+      "options": {
+        "mode": "markdown",
+        "content": "Flash Sale is not implemented. Admission and rejection series will be added with the campaign quota. Until then this dashboard only shows ordinary inventory reservations."
+      }
+    }
+  ]
+}

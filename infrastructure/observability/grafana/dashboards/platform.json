@@ -1,0 +1,68 @@
+{
+  "uid": "bazaar-platform",
+  "title": "BAZAAR Platform Overview",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "timezone": "utc",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Targets up",
+      "description": "How many Prometheus targets answered the last scrape. A drop means a service or exporter is down, not that a checkout failed.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(up)", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Request rate",
+      "description": "HTTP requests per second across the Java services and the gateway. This is traffic, not successful checkouts.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count[5m]))", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "5xx rate",
+      "description": "Server error responses per second. A business rejection such as 409 or 429 is not included.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active sagas",
+      "description": "Orders still in PENDING_INVENTORY, PENDING_PAYMENT, PENDING_INVENTORY_COMMIT, or COMPENSATING.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "bazaar_saga_active", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request rate by service",
+      "description": "Throughput for each scraped Java service. The job label is the service name, never a customer or order id.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "expr": "sum by (job) (rate(http_server_requests_seconds_count[5m]))", "legendFormat": "{{job}}", "refId": "A" }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Process memory",
+      "description": "Resident memory reported by each process. Compare it with the container limit before raising replica count.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "process_resident_memory_bytes", "legendFormat": "{{job}}", "refId": "A" }]
+    }
+  ]
+}

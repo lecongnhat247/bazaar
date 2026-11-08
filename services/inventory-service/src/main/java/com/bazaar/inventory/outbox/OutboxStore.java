@@ -34,8 +34,8 @@ public class OutboxStore {
         jdbc.update("""
                 INSERT INTO outbox (
                     id, event_id, aggregate_type, aggregate_id, event_type, event_version,
-                    correlation_id, payload, occurred_at, status, retry_count)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?::jsonb, ?, 'PENDING', 0)
+                    correlation_id, payload, occurred_at, status, retry_count, traceparent)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?::jsonb, ?, 'PENDING', 0, ?)
                 """,
                 UUID.randomUUID(),
                 UUID.randomUUID(),
@@ -44,7 +44,8 @@ public class OutboxStore {
                 eventType,
                 correlationId,
                 objectMapper.writeValueAsString(payload),
-                Timestamp.from(occurredAt));
+                Timestamp.from(occurredAt),
+                TraceContext.current());
     }
 
     @Transactional
@@ -78,7 +79,7 @@ public class OutboxStore {
                 WHERE message.id = claimed.id
                 RETURNING message.id, message.event_id, message.aggregate_type, message.aggregate_id,
                           message.event_type, message.event_version, message.correlation_id, message.causation_id,
-                          message.payload::text, message.occurred_at, message.retry_count
+                          message.payload::text, message.occurred_at, message.retry_count, message.traceparent
                 """, this::message, Timestamp.from(now), batchSize, Timestamp.from(now));
     }
 
@@ -129,7 +130,8 @@ public class OutboxStore {
                 rs.getObject("causation_id", UUID.class),
                 rs.getString("payload"),
                 rs.getTimestamp("occurred_at").toInstant(),
-                rs.getInt("retry_count"));
+                rs.getInt("retry_count"),
+                rs.getString("traceparent"));
     }
 
     private static String trim(String error) {

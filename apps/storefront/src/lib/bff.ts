@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { readGatewayUrl } from "@/lib/gateway";
 import { refreshTokens, type TokenSet } from "@/lib/keycloak";
@@ -51,13 +51,24 @@ async function renew(refresh: string | undefined): Promise<TokenSet | null> {
 }
 
 async function call(url: string, init: RequestInit, access: string | undefined): Promise<Response> {
-  const headers = new Headers(init.headers);
+  const outbound = new Headers(init.headers);
   if (access) {
-    headers.set("Authorization", `Bearer ${access}`);
+    outbound.set("Authorization", `Bearer ${access}`);
+  }
+  const incoming = await headers();
+  const traceparent = incoming.get("traceparent");
+  if (traceparent && /^[\da-f]{2}-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/.test(traceparent)) {
+    outbound.set("traceparent", traceparent);
+  }
+  const correlationId = incoming.get("x-correlation-id");
+  if (correlationId && /^[A-Za-z0-9._:-]{8,80}$/.test(correlationId)) {
+    outbound.set("X-Correlation-Id", correlationId);
+  } else if (!outbound.has("X-Correlation-Id")) {
+    outbound.set("X-Correlation-Id", crypto.randomUUID());
   }
   return fetch(url, {
     ...init,
-    headers,
+    headers: outbound,
     cache: "no-store",
   });
 }
