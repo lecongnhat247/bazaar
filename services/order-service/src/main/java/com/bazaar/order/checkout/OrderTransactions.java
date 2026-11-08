@@ -63,15 +63,16 @@ class OrderTransactions {
             String currency,
             BigDecimal total,
             List<Line> lines,
-            Instant now) {
+            Instant now,
+            UUID campaignId) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO customer_order (
                     id, customer_id, status, currency, total_amount, outcome,
-                    idempotency_key, request_hash, payment_state, created_at, updated_at)
-                VALUES (?, ?, 'PENDING_INVENTORY', ?, ?, ?, ?, ?, 'NONE', ?, ?)
+                    idempotency_key, request_hash, payment_state, created_at, updated_at, campaign_id)
+                VALUES (?, ?, 'PENDING_INVENTORY', ?, ?, ?, ?, ?, 'NONE', ?, ?, ?)
                 """, id, access.subject(), currency, total, outcome, key, hash,
-                Timestamp.from(now), Timestamp.from(now));
+                Timestamp.from(now), Timestamp.from(now), campaignId);
         for (Line line : lines) {
             jdbc.update("""
                     INSERT INTO order_item (
@@ -83,12 +84,8 @@ class OrderTransactions {
         }
         history(id, "PENDING_INVENTORY", 1, now);
         fact(id, "order.pending-inventory", "PENDING_INVENTORY", now);
-        command(inventoryCommands, "inventory.reservation-requested", id.toString(), id, java.util.Map.of(
-                "orderId", id.toString(),
-                "customerId", access.subject(),
-                "items", lines.stream().map(line -> java.util.Map.of(
-                        "productId", line.productId().toString(),
-                        "quantity", line.quantity())).toList()), now);
+        command(inventoryCommands, "inventory.reservation-requested", id.toString(), id,
+                reservationCommand(id, access.subject(), campaignId, lines), now);
         return required(id);
     }
 
@@ -258,7 +255,7 @@ class OrderTransactions {
     private OrderRow required(UUID id) {
         List<OrderRow> rows = jdbc.query("""
                 SELECT id, customer_id, status, currency, total_amount, outcome, request_hash, payment_id,
-                       compensate_to, payment_state, saga_attempt, created_at, updated_at
+                       compensate_to, payment_state, saga_attempt, created_at, updated_at, campaign_id
                 FROM customer_order
                 WHERE id = ?
                 """, (rs, n) -> new OrderRow(
@@ -275,7 +272,8 @@ class OrderTransactions {
                         rs.getString("payment_state"),
                         rs.getInt("saga_attempt"),
                         rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant()),
+                        rs.getTimestamp("updated_at").toInstant(),
+                        rs.getObject("campaign_id", UUID.class)),
                 id);
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order was not found.");
@@ -295,7 +293,8 @@ class OrderTransactions {
                 row.paymentState(),
                 row.sagaAttempt(),
                 row.createdAt(),
-                row.updatedAt());
+                row.updatedAt(),
+                row.campaignId());
     }
 
     private List<Line> itemsOf(UUID orderId) {
@@ -476,12 +475,8 @@ class OrderTransactions {
         switch (order.status()) {
             case "PENDING_INVENTORY" -> {
                 if (!inFlight(order.id().toString(), "inventory.reservation-requested")) {
-                    command(inventoryCommands, "inventory.reservation-requested", order.id().toString(), order.id(), java.util.Map.of(
-                            "orderId", order.id().toString(),
-                            "customerId", order.customerId(),
-                            "items", order.lines().stream().map(line -> java.util.Map.of(
-                                    "productId", line.productId().toString(),
-                                    "quantity", line.quantity())).toList()), now);
+                    command(inventoryCommands, "inventory.reservation-requested", order.id().toString(), order.id(),
+                            reservationCommand(order.id(), order.customerId(), order.campaignId(), order.lines()), now);
                 }
             }
             case "PENDING_PAYMENT" -> requestPayment(order, now);
@@ -692,6 +687,19 @@ class OrderTransactions {
                 "customerId", latestCustomer(orderId)), now, orderTopic);
     }
 
+    private static Map<String, Object> reservationCommand(UUID orderId, String customerId, UUID campaignId, List<Line> lines) {
+        Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("orderId", orderId.toString());
+        command.put("customerId", customerId);
+        if (campaignId != null) {
+            command.put("campaignId", campaignId.toString());
+        }
+        command.put("items", lines.stream().map(line -> Map.of(
+                "productId", line.productId().toString(),
+                "quantity", line.quantity())).toList());
+        return command;
+    }
+
     private void command(String topic, String eventType, String aggregateId, UUID correlationId, Object payload, Instant now) {
         outbox.add(eventType, "command", aggregateId, correlationId, payload, now, topic);
     }
@@ -762,6 +770,7 @@ class OrderTransactions {
             String paymentState,
             int sagaAttempt,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            UUID campaignId) {
     }
 }

@@ -35,7 +35,8 @@ public class OrderController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CheckoutRequest request) {
-        CheckoutOutcome outcome = checkout.checkout(jwt, idempotencyKey, request.items(), request.outcome());
+        CheckoutOutcome outcome = checkout.checkout(
+                jwt, idempotencyKey, request.items(), request.outcome(), request.campaignId());
         if (outcome.created()) {
             return ResponseEntity.status(201).body(outcome.order());
         }

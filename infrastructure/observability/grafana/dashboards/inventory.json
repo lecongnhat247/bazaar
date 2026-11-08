@@ -28,14 +28,13 @@
     },
     {
       "id": 3,
-      "type": "text",
-      "title": "Flash Sale",
-      "description": "Flash Sale admission and rejection counters are not emitted yet.",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 8 },
-      "options": {
-        "mode": "markdown",
-        "content": "Flash Sale is not implemented. Admission and rejection series will be added with the campaign quota. Until then this dashboard only shows ordinary inventory reservations."
-      }
+      "type": "timeseries",
+      "title": "Flash sale quota",
+      "description": "reserved means Postgres accepted the campaign quantity. rejected means the quota, window, product, or per-customer limit refused it. Redis does not authorize a sale.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [{ "expr": "sum by (result) (rate(bazaar_flash_reservations_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }]
     }
   ]
 }

@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +55,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.bazaar.inventory.messaging.CommandConsumer;
 import com.bazaar.inventory.messaging.ServiceEventConsumer;
 import com.bazaar.inventory.outbox.OutboxPublisher;
+import com.bazaar.inventory.stock.InventoryTransactions.Requested;
+import com.bazaar.inventory.stock.StockShortException;
 
 @SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
 @AutoConfigureMockMvc
@@ -99,6 +102,17 @@ class InventoryApplicationTests {
     static void kafka(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.kafka.listener.auto-startup", () -> "true");
+    }
+
+    @AfterEach
+    void drainOutbox() {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            Integer pending = jdbc.queryForObject("SELECT COUNT(*) FROM outbox WHERE status = 'PENDING'", Integer.class);
+            if (pending == null || pending == 0) {
+                return;
+            }
+            outbox.publishPending();
+        }
     }
 
     @Test
@@ -688,6 +702,246 @@ class InventoryApplicationTests {
         assertThat(failures).isEqualTo(1);
         mockMvc.perform(get("/api/v1/inventory/products/" + productId).with(customer("customer-command")))
                 .andExpect(jsonPath("$.available").value(0));
+    }
+
+    @Test
+    void concurrentCampaignReservationsNeverExceedQuota() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-quota", productId, 40, 15, 15);
+        int attempts = 30;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attempts);
+        AtomicInteger won = new AtomicInteger();
+        AtomicInteger lost = new AtomicInteger();
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
+        Instant now = Instant.now();
+        for (int i = 0; i < attempts; i++) {
+            String customerId = "buyer-quota-" + i;
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await(10, TimeUnit.SECONDS);
+                    transactions.reserveForSaga(
+                            UUID.randomUUID(),
+                            customerId,
+                            List.of(new Requested(productId, 1)),
+                            now,
+                            now.plusSeconds(900),
+                            campaignId);
+                    won.incrementAndGet();
+                } catch (StockShortException exception) {
+                    lost.incrementAndGet();
+                } catch (Throwable failure) {
+                    unexpected.set(failure);
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        assertThat(done.await(60, TimeUnit.SECONDS)).isTrue();
+        pool.shutdown();
+        assertThat(unexpected.get()).isNull();
+        assertThat(won.get()).isEqualTo(15);
+        assertThat(lost.get()).isEqualTo(15);
+        assertCampaign(campaignId, 15, 0, 15, 0);
+        var stock = inventory.get(token("customer-quota", "CUSTOMER"), productId);
+        assertThat(stock.available()).isEqualTo(25);
+        assertThat(stock.reserved()).isEqualTo(15);
+    }
+
+    @Test
+    void oneCustomerCannotPassTheCampaignLimit() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-limit", productId, 10, 10, 2);
+        Instant now = Instant.now();
+        int won = 0;
+        for (int i = 0; i < 4; i++) {
+            try {
+                transactions.reserveForSaga(
+                        UUID.randomUUID(),
+                        "buyer-limit",
+                        List.of(new Requested(productId, 1)),
+                        now,
+                        now.plusSeconds(900),
+                        campaignId);
+                won++;
+            } catch (StockShortException exception) {
+                assertThat(exception.getMessage()).contains("limit");
+            }
+        }
+        assertThat(won).isEqualTo(2);
+        assertCampaign(campaignId, 10, 8, 2, 0);
+    }
+
+    @Test
+    void aLargeQuotaStillAdmitsEveryAttemptUnderIt() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-thousand", productId, 1000, 1000, 1000);
+        int attempts = 40;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attempts);
+        AtomicInteger won = new AtomicInteger();
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
+        Instant now = Instant.now();
+        for (int i = 0; i < attempts; i++) {
+            String customerId = "buyer-thousand-" + i;
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await(10, TimeUnit.SECONDS);
+                    transactions.reserveForSaga(
+                            UUID.randomUUID(),
+                            customerId,
+                            List.of(new Requested(productId, 1)),
+                            now,
+                            now.plusSeconds(900),
+                            campaignId);
+                    won.incrementAndGet();
+                } catch (Throwable failure) {
+                    unexpected.set(failure);
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        assertThat(done.await(60, TimeUnit.SECONDS)).isTrue();
+        pool.shutdown();
+        assertThat(unexpected.get()).isNull();
+        assertThat(won.get()).isEqualTo(40);
+        assertCampaign(campaignId, 1000, 960, 40, 0);
+    }
+
+    @Test
+    void expiredCampaignReservationRestoresQuotaAndStock() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-expire", productId, 5, 5, 5);
+        Instant now = Instant.now();
+        transactions.reserveForSaga(
+                UUID.randomUUID(),
+                "buyer-expire",
+                List.of(new Requested(productId, 1)),
+                now,
+                now.plusSeconds(900),
+                campaignId);
+        jdbc.update("UPDATE stock_reservation SET expires_at = ? WHERE campaign_id = ?", Timestamp.from(now.minusSeconds(5)), campaignId);
+        assertThat(inventory.expireDue()).isGreaterThanOrEqualTo(1);
+        assertCampaign(campaignId, 5, 5, 0, 0);
+        var stock = inventory.get(token("buyer-expire", "CUSTOMER"), productId);
+        assertThat(stock.available()).isEqualTo(5);
+        assertThat(stock.reserved()).isZero();
+    }
+
+    @Test
+    void commitAndReleaseMoveTheCampaignHold() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-hold", productId, 5, 5, 5);
+        Instant now = Instant.now();
+        UUID committedOrder = UUID.randomUUID();
+        transactions.reserveForSaga(committedOrder, "buyer-hold", List.of(new Requested(productId, 1)), now, now.plusSeconds(900), campaignId);
+        UUID releasedOrder = UUID.randomUUID();
+        transactions.reserveForSaga(releasedOrder, "buyer-hold-2", List.of(new Requested(productId, 1)), now, now.plusSeconds(900), campaignId);
+        UUID committed = jdbc.queryForObject("SELECT id FROM stock_reservation WHERE idempotency_key LIKE ?", UUID.class, "%" + committedOrder.toString().replace("-", "") + "%");
+        UUID released = jdbc.queryForObject("SELECT id FROM stock_reservation WHERE idempotency_key LIKE ?", UUID.class, "%" + releasedOrder.toString().replace("-", "") + "%");
+        assertThat(transactions.commitForSaga("buyer-hold", committed, Instant.now())).isTrue();
+        assertThat(transactions.releaseForSaga(released, Instant.now())).isTrue();
+        assertCampaign(campaignId, 5, 4, 0, 1);
+        var stock = inventory.get(token("buyer-hold", "CUSTOMER"), productId);
+        assertThat(stock.available()).isEqualTo(4);
+        assertThat(stock.reserved()).isZero();
+    }
+
+    @Test
+    void aRepeatedSagaKeyConsumesTheQuotaOnce() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-replay", productId, 5, 5, 5);
+        Instant now = Instant.now();
+        UUID orderId = UUID.randomUUID();
+        transactions.reserveForSaga(orderId, "buyer-replay", List.of(new Requested(productId, 2)), now, now.plusSeconds(900), campaignId);
+        transactions.reserveForSaga(orderId, "buyer-replay", List.of(new Requested(productId, 2)), now, now.plusSeconds(900), campaignId);
+        assertCampaign(campaignId, 5, 3, 2, 0);
+        Integer rows = jdbc.queryForObject("SELECT COUNT(*) FROM stock_reservation WHERE campaign_id = ?", Integer.class, campaignId);
+        assertThat(rows).isEqualTo(1);
+    }
+
+    @Test
+    void cancellingACampaignReleasesHeldQuota() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-cancel", productId, 5, 5, 5);
+        Instant now = Instant.now();
+        transactions.reserveForSaga(UUID.randomUUID(), "buyer-cancel", List.of(new Requested(productId, 2)), now, now.plusSeconds(900), campaignId);
+        var cancelled = transactions.cancelCampaign(
+                com.bazaar.inventory.stock.InventoryAccess.from(token("seller-cancel", "SELLER")),
+                campaignId,
+                Instant.now());
+        assertThat(cancelled.status()).isEqualTo("CANCELLED");
+        assertCampaign(campaignId, 5, 5, 0, 0);
+        var stock = inventory.get(token("buyer-cancel", "CUSTOMER"), productId);
+        assertThat(stock.available()).isEqualTo(5);
+        assertThat(stock.reserved()).isZero();
+    }
+
+    @Test
+    void reconcileStaysBalancedAfterAReservation() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID campaignId = campaign("seller-reconcile", productId, 8, 8, 8);
+        Instant now = Instant.now();
+        transactions.reserveForSaga(UUID.randomUUID(), "buyer-reconcile", List.of(new Requested(productId, 3)), now, now.plusSeconds(900), campaignId);
+        mockMvc.perform(post("/api/v1/inventory/campaigns/" + campaignId + "/reconcile").with(seller("seller-reconcile")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.quota").value(8))
+                .andExpect(jsonPath("$.remaining").value(5))
+                .andExpect(jsonPath("$.held").value(3))
+                .andExpect(jsonPath("$.committed").value(0))
+                .andExpect(jsonPath("$.balanced").value(true));
+    }
+
+    private UUID campaign(String seller, UUID productId, int onHand, int quota, int limit) throws Exception {
+        inventory.setOnHand(token(seller, "SELLER"), productId, onHand);
+        String windowStart = Instant.now().minusSeconds(60).toString();
+        String windowEnd = Instant.now().plusSeconds(3600).toString();
+        MvcResult created = mockMvc.perform(post("/api/v1/inventory/campaigns")
+                        .with(seller(seller))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"%s","price":9.00,"currency":"USD","quota":%d,"perCustomerLimit":%d,"startsAt":"%s","endsAt":"%s"}
+                                """.formatted(productId, quota, limit, windowStart, windowEnd)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("DRAFT"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        mockMvc.perform(post("/api/v1/inventory/campaigns/" + id + "/schedule").with(seller(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+        return UUID.fromString(id);
+    }
+
+    private void assertCampaign(UUID campaignId, int quota, int remaining, int held, int committed) {
+        Integer actualRemaining = jdbc.queryForObject("SELECT remaining FROM flash_campaign WHERE id = ?", Integer.class, campaignId);
+        Integer actualHeld = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(held), 0) FROM flash_hold WHERE campaign_id = ?",
+                Integer.class,
+                campaignId);
+        Integer actualCommitted = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(committed), 0) FROM flash_hold WHERE campaign_id = ?",
+                Integer.class,
+                campaignId);
+        assertThat(actualRemaining).isEqualTo(remaining);
+        assertThat(actualHeld).isEqualTo(held);
+        assertThat(actualCommitted).isEqualTo(committed);
+        assertThat(remaining + held + committed).isEqualTo(quota);
+        Integer negative = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM flash_campaign WHERE id = ? AND remaining < 0",
+                Integer.class,
+                campaignId);
+        assertThat(negative).isZero();
     }
 
     private static String command(UUID eventId, UUID orderId, UUID productId, int quantity) {

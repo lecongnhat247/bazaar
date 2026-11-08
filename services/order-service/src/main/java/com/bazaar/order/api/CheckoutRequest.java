@@ -10,5 +10,6 @@ import jakarta.validation.constraints.Size;
 
 public record CheckoutRequest(
         @NotEmpty @Size(max = 20) List<@Valid CheckoutItem> items,
-        @NotNull @Pattern(regexp = "SUCCESS|FAILURE") String outcome) {
+        @NotNull @Pattern(regexp = "SUCCESS|FAILURE") String outcome,
+        java.util.UUID campaignId) {
 }

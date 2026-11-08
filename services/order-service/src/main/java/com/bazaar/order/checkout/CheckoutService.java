@@ -40,20 +40,20 @@ public class CheckoutService {
         this.clock = clock;
     }
 
-    public CheckoutOutcome checkout(Jwt jwt, String idempotencyKey, List<CheckoutItem> items, String outcome) {
+    public CheckoutOutcome checkout(Jwt jwt, String idempotencyKey, List<CheckoutItem> items, String outcome, UUID campaignId) {
         metrics.attempt();
         try {
             OrderAccess access = access(jwt);
             String key = validKey(idempotencyKey);
             List<CheckoutItem> lines = uniqueItems(items);
-            String hash = hash(access.subject(), outcome, lines);
+            String hash = hash(access.subject(), outcome, campaignId, lines);
             OrderRow existing = transactions.findByKey(key);
             if (existing != null) {
                 CheckoutOutcome replayed = new CheckoutOutcome(replay(access, existing, hash), false);
                 metrics.replay();
                 return replayed;
             }
-            List<Priced> priced = price(lines);
+            List<Priced> priced = price(lines, campaignId);
             try {
                 OrderRow created = transactions.insert(
                         access,
@@ -63,7 +63,8 @@ public class CheckoutService {
                         priced.getFirst().product().currency(),
                         total(priced),
                         snapshot(priced),
-                        clock.instant());
+                        clock.instant(),
+                        campaignId);
                 metrics.accepted();
                 return new CheckoutOutcome(transactions.response(created), true);
             } catch (DataIntegrityViolationException conflict) {
@@ -102,7 +103,12 @@ public class CheckoutService {
         return transactions.response(order);
     }
 
-    private List<Priced> price(List<CheckoutItem> items) {
+    private List<Priced> price(List<CheckoutItem> items, UUID campaignId) {
+        DownstreamClient.CampaignQuote campaign = campaignId == null ? null : fetchCampaign(campaignId);
+        if (campaign != null && (items.size() != 1 || !items.getFirst().productId().equals(campaign.productId())
+                || !"ACTIVE".equals(campaign.status()))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "The campaign does not apply to this checkout.");
+        }
         List<Priced> priced = new ArrayList<>();
         for (CheckoutItem item : items) {
             CatalogProduct product = fetchProduct(item.productId());
@@ -110,7 +116,10 @@ public class CheckoutService {
                     || !product.currency().matches("[A-Z]{3}")) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Product is not available.");
             }
-            BigDecimal unit = money(product.price());
+            BigDecimal unit = campaign == null ? money(product.price()) : money(campaign.price());
+            if (campaign != null && !campaign.currency().equals(product.currency())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "The campaign does not apply to this checkout.");
+            }
             if (unit.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Product is not available.");
             }
@@ -121,6 +130,17 @@ public class CheckoutService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Products use more than one currency.");
         }
         return priced;
+    }
+
+    private DownstreamClient.CampaignQuote fetchCampaign(UUID id) {
+        try {
+            return downstream.campaign(id);
+        } catch (DownstreamFailure failure) {
+            if (failure.status() == 404) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "The campaign does not apply to this checkout.");
+            }
+            throw unavailable(failure);
+        }
     }
 
     private CatalogProduct fetchProduct(UUID id) {
@@ -192,13 +212,14 @@ public class CheckoutService {
         return items;
     }
 
-    private static String hash(String customer, String outcome, List<CheckoutItem> items) {
+    private static String hash(String customer, String outcome, UUID campaignId, List<CheckoutItem> items) {
         String body = items.stream()
                 .sorted(Comparator.comparing(CheckoutItem::productId))
                 .map(item -> item.productId() + ":" + item.quantity())
                 .reduce((left, right) -> left + "," + right)
                 .orElse("");
-        return digest(customer + "|" + outcome + "|" + body);
+        String campaign = campaignId == null ? "" : campaignId.toString();
+        return digest(customer + "|" + outcome + "|" + campaign + "|" + body);
     }
 
     private static String digest(String source) {

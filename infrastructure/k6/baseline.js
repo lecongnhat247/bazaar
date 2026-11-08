@@ -6,7 +6,8 @@
 // are the payment-failure path and should return that stock through the saga.
 // Set RUN_ID to a new short token before each run so checkout keys are not replays.
 // ONLY=checkout runs just the normal and concurrent checkout scenarios.
-// Flash Sale is not implemented. That scenario only records that the route is absent.
+// The last scenario probes GET /api/v1/flash-sales and expects 404.
+// Campaign checkout lives under /api/v1/inventory/campaigns and is measured by flash-sale.js.
 
 import http from 'k6/http';
 import exec from 'k6/execution';

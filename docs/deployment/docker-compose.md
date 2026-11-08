@@ -66,9 +66,10 @@ A small k6 smoke lives in `infrastructure/k6`. The Phase 4 M2 baseline is `infra
 export MSYS_NO_PATHCONV=1
 docker run --rm -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/catalog.js
 docker run --rm -e RUN_ID=a -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/baseline.js
+docker run --rm -e RUN_ID=m4a -e QUOTA=5 -e LIMIT=8 -e ON_HAND=20 -e VUS=4 -e ITERATIONS=8 -v "D:/bazaar/infrastructure/k6:/scripts" grafana/k6 run /scripts/flash-sale.js
 ```
 
-Use a new `RUN_ID` for each baseline run. A repeated id replays the same checkout idempotency keys. `ONLY=checkout` runs only the normal and concurrent checkout scenarios.
+Use a new `RUN_ID` for each baseline run. A repeated id replays the same checkout idempotency keys. `ONLY=checkout` runs only the normal and concurrent checkout scenarios. `flash-sale.js` creates a new product and a small campaign. It does not use the lamp or shirt seed. The measured note is [the M4 flash sale report](../performance/m4-flash-sale.md).
 
 Redis keeps a 64 MB cache with no disk snapshot. Catalog and the gateway read `REDIS_HOST`. Neither waits for Redis before serving HTTP, and readiness does not include Redis. A restart drops cached pages and rate-limit counters. PostgreSQL remains the catalog source of truth. The notification service can use the same Redis to share socket rooms across instances. Its notices stay in PostgreSQL.
 

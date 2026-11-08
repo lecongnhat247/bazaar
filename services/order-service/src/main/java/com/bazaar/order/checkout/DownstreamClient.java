@@ -34,6 +34,14 @@ class DownstreamClient {
         this.payment = client(builders, paymentUrl);
     }
 
+    CampaignQuote campaign(UUID id) {
+        return call(() -> inventory.get()
+                .uri("/api/v1/inventory/campaigns/{id}", id)
+                .headers(this::forwardContext)
+                .retrieve()
+                .body(CampaignQuote.class));
+    }
+
     CatalogProduct product(UUID id) {
         return call(() -> catalog.get()
                 .uri("/api/v1/products/{id}", id)
@@ -135,6 +143,16 @@ class DownstreamClient {
     @FunctionalInterface
     private interface Remote<T> {
         T get();
+    }
+
+    record CampaignQuote(
+            UUID id,
+            UUID productId,
+            BigDecimal price,
+            String currency,
+            String status,
+            int remaining,
+            int perCustomerLimit) {
     }
 
     record CatalogProduct(

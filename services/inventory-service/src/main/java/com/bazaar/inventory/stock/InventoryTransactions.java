@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.inventory.api.CampaignResponse;
 import com.bazaar.inventory.outbox.OutboxStore;
 
 @Service
@@ -19,11 +20,13 @@ public class InventoryTransactions {
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
     private final InventoryMetrics metrics;
+    private final FlashCampaigns campaigns;
 
-    InventoryTransactions(JdbcTemplate jdbc, OutboxStore outbox, InventoryMetrics metrics) {
+    InventoryTransactions(JdbcTemplate jdbc, OutboxStore outbox, InventoryMetrics metrics, FlashCampaigns campaigns) {
         this.jdbc = jdbc;
         this.outbox = outbox;
         this.metrics = metrics;
+        this.campaigns = campaigns;
     }
 
     @Transactional
@@ -75,14 +78,16 @@ public class InventoryTransactions {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int expireDue(Instant now) {
         List<Held> due = jdbc.query("""
-                SELECT id, product_id, quantity
+                SELECT id, product_id, quantity, requester_id, campaign_id
                 FROM stock_reservation
                 WHERE status = 'HELD' AND expires_at <= ?
                 FOR UPDATE SKIP LOCKED
                 """, (rs, row) -> new Held(
                         rs.getObject("id", UUID.class),
                         rs.getObject("product_id", UUID.class),
-                        rs.getInt("quantity")),
+                        rs.getInt("quantity"),
+                        rs.getString("requester_id"),
+                        rs.getObject("campaign_id", UUID.class)),
                 Timestamp.from(now));
         int expired = 0;
         for (Held held : due) {
@@ -93,6 +98,9 @@ public class InventoryTransactions {
                     """, Timestamp.from(now), held.id());
             if (changed == 1) {
                 returnStock(held.productId(), held.quantity(), now);
+                if (held.campaignId() != null) {
+                    campaigns.restore(held.campaignId(), held.customerId(), held.quantity(), now);
+                }
                 movement(held.productId(), held.id(), "EXPIRE", held.quantity(), now);
                 reservationEvent("inventory.expired", held.id(), held.productId(), held.quantity(), "EXPIRED", now, null);
                 expired++;
@@ -127,8 +135,8 @@ public class InventoryTransactions {
         jdbc.update("""
                 INSERT INTO stock_reservation (
                     id, product_id, quantity, status, idempotency_key, request_hash,
-                    requester_id, expires_at, created_at, updated_at)
-                VALUES (?, ?, ?, 'HELD', ?, ?, ?, ?, ?, ?)
+                    requester_id, expires_at, created_at, updated_at, campaign_id)
+                VALUES (?, ?, ?, 'HELD', ?, ?, ?, ?, ?, ?, NULL)
                 """, id, productId, quantity, key, hash, access.subject(),
                 Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now));
         movement(productId, id, "RESERVE", quantity, now);
@@ -138,6 +146,20 @@ public class InventoryTransactions {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reserveForSaga(UUID orderId, String customerId, java.util.List<Requested> items, Instant now, Instant expiresAt) {
+        reserveForSaga(orderId, customerId, items, now, expiresAt, null);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void reserveForSaga(
+            UUID orderId,
+            String customerId,
+            java.util.List<Requested> items,
+            Instant now,
+            Instant expiresAt,
+            UUID campaignId) {
+        if (campaignId != null && items.size() != 1) {
+            throw new StockShortException("A flash sale checkout has one product.");
+        }
         java.util.List<Requested> ordered = new java.util.ArrayList<>(items);
         ordered.sort(java.util.Comparator.comparing(Requested::productId));
         for (Requested item : ordered) {
@@ -155,14 +177,17 @@ public class InventoryTransactions {
             if (taken != 1) {
                 throw new StockShortException("Not enough stock is available.");
             }
+            if (campaignId != null) {
+                campaigns.consume(campaignId, item.productId(), customerId, item.quantity(), now);
+            }
             UUID id = UUID.randomUUID();
             jdbc.update("""
                     INSERT INTO stock_reservation (
                         id, product_id, quantity, status, idempotency_key, request_hash,
-                        requester_id, expires_at, created_at, updated_at)
-                    VALUES (?, ?, ?, 'HELD', ?, ?, ?, ?, ?, ?)
+                        requester_id, expires_at, created_at, updated_at, campaign_id)
+                    VALUES (?, ?, ?, 'HELD', ?, ?, ?, ?, ?, ?, ?)
                     """, id, item.productId(), item.quantity(), key, sagaHash(item.productId(), item.quantity(), customerId),
-                    customerId, Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now));
+                    customerId, Timestamp.from(expiresAt), Timestamp.from(now), Timestamp.from(now), campaignId);
             movement(item.productId(), id, "RESERVE", item.quantity(), now);
             reservationEvent("inventory.reserved", id, item.productId(), item.quantity(), "HELD", now, orderId);
         }
@@ -177,6 +202,7 @@ public class InventoryTransactions {
         if ("COMMITTED".equals(current.status())) {
             return false;
         }
+        lockProduct(current.productId());
         int changed = jdbc.update("""
                 UPDATE stock_reservation
                 SET status = 'COMMITTED', updated_at = ?
@@ -194,6 +220,10 @@ public class InventoryTransactions {
             throw new StockShortException("Reserved stock could not be committed.");
         }
         movement(current.productId(), reservationId, "COMMIT", current.quantity(), now);
+        UUID campaignId = campaignOf(reservationId);
+        if (campaignId != null) {
+            campaigns.commitHold(campaignId, current.requesterId(), current.quantity());
+        }
         reservationEvent("inventory.committed", reservationId, current.productId(), current.quantity(), "COMMITTED", now, null);
         return true;
     }
@@ -207,6 +237,7 @@ public class InventoryTransactions {
         if ("COMMITTED".equals(current.status())) {
             throw new StockShortException("A committed reservation cannot be released.");
         }
+        lockProduct(current.productId());
         int changed = jdbc.update("""
                 UPDATE stock_reservation
                 SET status = 'RELEASED', updated_at = ?
@@ -216,6 +247,7 @@ public class InventoryTransactions {
             return false;
         }
         returnStock(current.productId(), current.quantity(), now);
+        restoreCampaign(reservationId, current.requesterId(), current.quantity(), now);
         movement(current.productId(), reservationId, "RELEASE", current.quantity(), now);
         reservationEvent("inventory.released", reservationId, current.productId(), current.quantity(), "RELEASED", now, null);
         return true;
@@ -239,6 +271,7 @@ public class InventoryTransactions {
         if ("COMMITTED".equals(current.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "A committed reservation cannot be released.");
         }
+        lockProduct(current.productId());
         int changed = jdbc.update("""
                 UPDATE stock_reservation
                 SET status = 'RELEASED', updated_at = ?
@@ -246,6 +279,7 @@ public class InventoryTransactions {
                 """, Timestamp.from(now), id, access.subject(), access.admin());
         if (changed == 1) {
             returnStock(current.productId(), current.quantity(), now);
+            restoreCampaign(id, current.requesterId(), current.quantity(), now);
             movement(current.productId(), id, "RELEASE", current.quantity(), now);
             reservationEvent("inventory.released", id, current.productId(), current.quantity(), "RELEASED", now, null);
             return findReservation(id).withoutSecrets();
@@ -288,6 +322,13 @@ public class InventoryTransactions {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This reservation is no longer held.");
         }
         return latest.withoutSecrets();
+    }
+
+    private void lockProduct(UUID productId) {
+        jdbc.query(
+                "SELECT product_id FROM inventory_item WHERE product_id = ? FOR UPDATE",
+                (rs, row) -> rs.getObject("product_id", UUID.class),
+                productId);
     }
 
     private void returnStock(UUID productId, int quantity, Instant now) {
@@ -383,6 +424,64 @@ public class InventoryTransactions {
     public record Requested(UUID productId, int quantity) {
     }
 
+    @Transactional
+    public CampaignResponse cancelCampaign(InventoryAccess access, UUID id, Instant now) {
+        List<UUID> products = jdbc.query(
+                "SELECT product_id FROM flash_campaign WHERE id = ?",
+                (rs, row) -> rs.getObject("product_id", UUID.class),
+                id);
+        if (products.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign was not found.");
+        }
+        jdbc.query("SELECT product_id FROM inventory_item WHERE product_id = ? FOR UPDATE",
+                (rs, row) -> rs.getObject("product_id", UUID.class),
+                products.getFirst());
+        campaigns.markCancelled(access, id, now);
+        List<UUID> held = jdbc.query("""
+                SELECT id FROM stock_reservation
+                WHERE campaign_id = ? AND status = 'HELD'
+                FOR UPDATE
+                """, (rs, row) -> rs.getObject("id", UUID.class), id);
+        for (UUID reservationId : held) {
+            releaseHeld(reservationId, now);
+        }
+        return campaigns.visible(access, id, now);
+    }
+
+    private void releaseHeld(UUID reservationId, Instant now) {
+        ReservationResponse current = findReservation(reservationId);
+        if (current == null || !"HELD".equals(current.status())) {
+            return;
+        }
+        int changed = jdbc.update("""
+                UPDATE stock_reservation
+                SET status = 'RELEASED', updated_at = ?
+                WHERE id = ? AND status = 'HELD'
+                """, Timestamp.from(now), reservationId);
+        if (changed != 1) {
+            return;
+        }
+        returnStock(current.productId(), current.quantity(), now);
+        restoreCampaign(reservationId, current.requesterId(), current.quantity(), now);
+        movement(current.productId(), reservationId, "RELEASE", current.quantity(), now);
+        reservationEvent("inventory.released", reservationId, current.productId(), current.quantity(), "RELEASED", now, null);
+    }
+
+    private void restoreCampaign(UUID reservationId, String customerId, int quantity, Instant now) {
+        UUID campaignId = campaignOf(reservationId);
+        if (campaignId != null) {
+            campaigns.restore(campaignId, customerId, quantity, now);
+        }
+    }
+
+    private UUID campaignOf(UUID reservationId) {
+        List<UUID> ids = jdbc.query(
+                "SELECT campaign_id FROM stock_reservation WHERE id = ?",
+                (rs, row) -> rs.getObject("campaign_id", UUID.class),
+                reservationId);
+        return ids.isEmpty() ? null : ids.getFirst();
+    }
+
     private void movement(UUID productId, UUID reservationId, String type, int quantity, Instant now) {
         jdbc.update("""
                 INSERT INTO inventory_movement (id, product_id, reservation_id, movement_type, quantity, created_at)
@@ -390,6 +489,6 @@ public class InventoryTransactions {
                 """, UUID.randomUUID(), productId, reservationId, type, quantity, Timestamp.from(now));
     }
 
-    private record Held(UUID id, UUID productId, int quantity) {
+    private record Held(UUID id, UUID productId, int quantity, String customerId, UUID campaignId) {
     }
 }

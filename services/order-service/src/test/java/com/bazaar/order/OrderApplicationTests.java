@@ -357,6 +357,39 @@ class OrderApplicationTests {
     }
 
     @Test
+    void checkoutChargesTheCampaignPrice() throws Exception {
+        UUID campaignId = UUID.fromString("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d2001");
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-campaign"))
+                        .header("Idempotency-Key", "order-key-campaign")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS", campaignId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.total").value(9.00))
+                .andExpect(jsonPath("$.items[0].unitPrice").value(9.00))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        String payload = jdbc.queryForObject(
+                "SELECT payload FROM outbox WHERE aggregate_id = ? AND event_type = 'inventory.reservation-requested'",
+                String.class,
+                id);
+        assertThat(payload).contains(campaignId.toString());
+        Integer stored = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM customer_order WHERE id = ? AND campaign_id = ?",
+                Integer.class,
+                UUID.fromString(id),
+                campaignId);
+        assertThat(stored).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-campaign"))
+                        .header("Idempotency-Key", "order-key-campaign-other")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(SHIRT, 1, "SUCCESS", campaignId)))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     void failedPaymentReleasesStock() throws Exception {
         mockMvc.perform(post("/api/v1/orders/checkout")
                         .with(customer("buyer-fail"))
@@ -706,6 +739,11 @@ class OrderApplicationTests {
                 + ",\"price\":1}],\"outcome\":\"" + outcome + "\"}";
     }
 
+    private static String body(UUID productId, int quantity, String outcome, UUID campaignId) {
+        return "{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
+                + "}],\"outcome\":\"" + outcome + "\",\"campaignId\":\"" + campaignId + "\"}";
+    }
+
     private static RequestPostProcessor customer(String subject) {
         return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("CUSTOMER"))));
     }
@@ -729,6 +767,12 @@ class OrderApplicationTests {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
         String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        if ("GET".equals(method) && path.startsWith("/api/v1/inventory/campaigns/")) {
+            String id = path.substring(path.lastIndexOf('/') + 1);
+            send(exchange, 200, "{\"id\":\"" + id + "\",\"productId\":\"" + LAMP
+                    + "\",\"price\":9.00,\"currency\":\"USD\",\"status\":\"ACTIVE\",\"remaining\":10,\"perCustomerLimit\":2}");
+            return;
+        }
         if ("GET".equals(method) && path.startsWith("/api/v1/products/")) {
             if ("CATALOG".equals(fault)) {
                 send(exchange, 500, "{\"error\":\"down\"}");

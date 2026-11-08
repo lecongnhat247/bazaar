@@ -79,10 +79,13 @@ public class CommandConsumer {
         for (JsonNode item : event.payload().get("items")) {
             items.add(new Requested(UUID.fromString(item.get("productId").asString()), item.get("quantity").asInt()));
         }
+        UUID campaignId = event.payload().hasNonNull("campaignId")
+                ? UUID.fromString(event.payload().get("campaignId").asString())
+                : null;
         int attempt = 0;
         while (true) {
             try {
-                transactions.reserveForSaga(orderId, customerId, items, now, now.plus(ttl));
+                transactions.reserveForSaga(orderId, customerId, items, now, now.plus(ttl), campaignId);
                 metrics.reserved();
                 return;
             } catch (StockShortException exception) {

@@ -28,11 +28,13 @@ Phase 2 delivers the customer purchase path on one PostgreSQL server and Keycloa
 
 Phase 3 adds one local KRaft broker and one local Redis. Checkout accepts the order, then the order service drives inventory and payment with commands. Each step is stored on the order and can be resumed after a restart. Consumers ignore a repeated `eventId`. The catalog can answer a public product or category read from Redis, and drops that entry when the product event is consumed. Checkout still reads the product price from the catalog database. The gateway counts requests in Redis and keeps serving if Redis is down. The notification service stores a customer's order and payment notices and delivers the live ones on an authenticated socket. The order service remains the record of status. A consumer that cannot apply a message copies it to `bazaar.dlq` after a short backoff. An outbox row that cannot be published is marked `DEAD` and kept. A real payment provider and the extra frontends are still later. The kind chart does not run Postgres, Keycloak, Kafka, or Redis.
 
-Phase 4 M1 adds Prometheus and Grafana beside Compose. Java services expose Prometheus metrics and continue a W3C trace through HTTP and the outbox. The notification service exposes its own metrics and writes JSON logs with the same trace id. Grafana shows eight dashboards. There is no separate trace store. Flash Sale is still later.
+Phase 4 M1 adds Prometheus and Grafana beside Compose. Java services expose Prometheus metrics and continue a W3C trace through HTTP and the outbox. The notification service exposes its own metrics and writes JSON logs with the same trace id. Grafana shows eight dashboards. There is no separate trace store. Flash Sale was still later.
 
 Phase 4 M2 records a small k6 baseline on this laptop. The report is [the M2 baseline](../performance/m2-baseline.md). It does not change checkout, the outbox, or inventory reservation, and it is not a capacity claim.
 
 Phase 4 M3 keeps stock reservation as one conditional update and records the lock chosen for each other path. A product edit now carries a version, and an order line can be found by reservation id. The notes are in [the M3 concurrency report](../performance/m3-concurrency.md).
+
+Phase 4 M4 adds a campaign quota beside warehouse stock in the inventory service. Checkout prices the order from the campaign and sends the campaign id on the existing reservation command. Postgres is the only component that can accept the sale. The notes are in [the M4 flash sale report](../performance/m4-flash-sale.md).
 
 ## Principles
 
