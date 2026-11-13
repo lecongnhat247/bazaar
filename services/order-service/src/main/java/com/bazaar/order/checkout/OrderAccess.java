@@ -13,6 +13,10 @@ public record OrderAccess(String subject, Set<String> roles) {
         return roles.contains("ADMIN");
     }
 
+    public boolean seller() {
+        return roles.contains("SELLER");
+    }
+
     public static OrderAccess from(Jwt jwt) {
         return new OrderAccess(jwt.getSubject(), rolesFrom(jwt));
     }

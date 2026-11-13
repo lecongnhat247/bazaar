@@ -822,6 +822,44 @@ class OrderApplicationTests {
     }
 
     @Test
+    void aSellerSeesOnlyTheirOwnLines() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-sales"))
+                        .header("Idempotency-Key", "order-key-sales")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(LAMP, 1, "SUCCESS")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        jdbc.update("""
+                INSERT INTO order_item (
+                    id, order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id)
+                VALUES (?, ?, ?, 'seller-2', 'OTHER-SKU', 'Other shirt', 10.00, 1, 10.00, ?)
+                """, UUID.randomUUID(), UUID.fromString(id), UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", "OTHER-SKU").with(seller("seller-2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(1))
+                .andExpect(jsonPath("$.orders[0].id").value(id))
+                .andExpect(jsonPath("$.orders[0].items.length()").value(1))
+                .andExpect(jsonPath("$.orders[0].items[0].sellerId").value("seller-2"))
+                .andExpect(jsonPath("$.orders[0].items[0].sku").value("OTHER-SKU"))
+                .andExpect(jsonPath("$.orders[0].paymentId").doesNotExist())
+                .andExpect(jsonPath("$.orders[0].total").doesNotExist());
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", "OTHER-SKU").with(seller("seller-1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(0));
+        mockMvc.perform(get("/api/v1/orders/sales").with(customer("buyer-sales")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/sales").with(admin("admin-sales")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/" + id).with(seller("seller-2")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/sales").param("status", "NOPE").with(seller("seller-2")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void invalidCheckoutIsRejected() throws Exception {
         mockMvc.perform(post("/api/v1/orders/checkout")
                         .with(customer("buyer-bad"))
@@ -851,6 +889,10 @@ class OrderApplicationTests {
 
     private static RequestPostProcessor customer(String subject) {
         return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("CUSTOMER"))));
+    }
+
+    private static RequestPostProcessor seller(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("SELLER"))));
     }
 
     private static RequestPostProcessor admin(String subject) {

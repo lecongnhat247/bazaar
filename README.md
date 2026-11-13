@@ -60,6 +60,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | --- | --- | --- |
 | M0 | Repository audit and domain design | Complete |
 | M1 | Seller domain foundation | Complete |
+| M2 | Seller Center | Complete |
 
 ## Documentation
 
@@ -96,6 +97,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | Application | Path | Host port when published | In-container port |
 | --- | --- | --- | --- |
 | Storefront | `apps/storefront` | 3000 | 3000 |
+| Seller Center | `apps/seller-center` | 3002 | 3000 |
 | API Gateway | `services/api-gateway` | 8080 | 8080 |
 | Identity | `services/identity-service` | 8081 | 8080 |
 | Catalog | `services/catalog-service` | 8082 | 8080 |

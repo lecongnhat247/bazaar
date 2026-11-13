@@ -936,6 +936,22 @@ class InventoryApplicationTests {
                 .andExpect(jsonPath("$.error").value("Seller is not active."));
     }
 
+    @Test
+    void aSellerListsOnlyTheirOwnCampaigns() throws Exception {
+        UUID productId = UUID.randomUUID();
+        UUID id = campaign("seller-list-a", productId, 5, 4, 1);
+
+        mockMvc.perform(get("/api/v1/inventory/campaigns").with(seller("seller-list-b")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+        mockMvc.perform(get("/api/v1/inventory/campaigns").with(seller("seller-list-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id.toString()))
+                .andExpect(jsonPath("$[0].sellerId").value("seller-list-a"));
+        mockMvc.perform(get("/api/v1/inventory/campaigns").with(customer("customer-list")))
+                .andExpect(status().isForbidden());
+    }
+
     private UUID campaign(String seller, UUID productId, int onHand, int quota, int limit) throws Exception {
         inventory.setOnHand(token(seller, "SELLER"), productId, onHand);
         String windowStart = Instant.now().minusSeconds(60).toString();

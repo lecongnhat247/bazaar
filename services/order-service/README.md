@@ -36,7 +36,8 @@ The process listens on port 8084 unless `SERVER_PORT` is set. A local run needs 
 | GET | `/actuator/health` | Public | Process health |
 | GET | `/api/v1/orders/info` | Public | Service name, version, and status |
 | POST | `/api/v1/orders/checkout` | Bearer JWT | Reserve stock, create the order, and simulate payment. Requires `Idempotency-Key` |
-| GET | `/api/v1/orders` | Bearer JWT | The caller's orders. An admin sees the latest 20 |
+| GET | `/api/v1/orders` | Bearer JWT | The caller's orders as a customer. An admin sees the latest 20 |
+| GET | `/api/v1/orders/sales` | Seller | This seller's lines only, with search and pages. An admin token without `SELLER` is refused |
 | GET | `/api/v1/orders/{id}` | Buyer or admin | Order, item price snapshot, and status history |
 | POST | `/api/v1/orders/{id}/cancel` | Buyer or admin | Cancel a `PENDING_PAYMENT` order and release its holds |
 

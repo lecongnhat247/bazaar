@@ -1,6 +1,7 @@
 package com.bazaar.inventory.api;
 
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,11 @@ public class CampaignController {
 
     public CampaignController(FlashSales campaigns) {
         this.campaigns = campaigns;
+    }
+
+    @GetMapping
+    public List<CampaignResponse> list(@AuthenticationPrincipal Jwt jwt) {
+        return campaigns.list(jwt);
     }
 
     @PostMapping

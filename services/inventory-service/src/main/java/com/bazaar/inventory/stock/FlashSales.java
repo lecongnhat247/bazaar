@@ -1,10 +1,13 @@
 package com.bazaar.inventory.stock;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.bazaar.inventory.api.CampaignReconcile;
 import com.bazaar.inventory.api.CampaignRequest;
@@ -41,6 +44,14 @@ public class FlashSales {
                 request.startsAt(),
                 request.endsAt(),
                 clock.instant());
+    }
+
+    public List<CampaignResponse> list(Jwt jwt) {
+        InventoryAccess access = InventoryAccess.from(jwt);
+        if (!access.roles().contains("SELLER")) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a seller can list their campaigns.");
+        }
+        return campaigns.list(access.subject(), clock.instant());
     }
 
     public CampaignResponse get(Jwt jwt, UUID id) {

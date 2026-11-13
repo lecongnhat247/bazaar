@@ -8,7 +8,9 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -202,6 +204,182 @@ class OrderTransactions {
                     row.updatedAt()));
         }
         return orders;
+    }
+
+    private static final Set<String> SALE_STATUSES = Set.of(
+            "PENDING_INVENTORY",
+            "PENDING_PAYMENT",
+            "PENDING_INVENTORY_COMMIT",
+            "COMPENSATING",
+            "CONFIRMED",
+            "PAYMENT_FAILED",
+            "CANCELLED",
+            "FAILED");
+
+    static boolean saleStatus(String status) {
+        return SALE_STATUSES.contains(status);
+    }
+
+    @Transactional(readOnly = true)
+    public SellerSalesPage sales(OrderAccess access, int page, int size, String status, String query) {
+        SaleFilter filter = saleFilter(access.subject(), status, query);
+        Object[] filterArgs = filter.args().toArray();
+        long totalOrders = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM customer_order " + filter.sql(),
+                Long.class,
+                filterArgs);
+        long pendingOrders = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM customer_order " + filter.sql()
+                        + " AND customer_order.status IN ('PENDING_INVENTORY', 'PENDING_PAYMENT', 'PENDING_INVENTORY_COMMIT', 'COMPENSATING')",
+                Long.class,
+                filterArgs);
+        SaleTotal total = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(item.line_total), 0),
+                       COUNT(DISTINCT BTRIM(customer_order.currency)),
+                       MIN(BTRIM(customer_order.currency))
+                FROM order_item item
+                JOIN customer_order ON customer_order.id = item.order_id
+                """ + filter.sql() + " AND item.seller_id = ?",
+                (rs, row) -> new SaleTotal(rs.getBigDecimal(1), rs.getInt(2), rs.getString(3)),
+                filter.with(access.subject()));
+        List<Object> pageArgs = new ArrayList<>(filter.args());
+        pageArgs.add(size);
+        pageArgs.add(page * (long) size);
+        List<ListedOrder> rows = jdbc.query("""
+                SELECT id, customer_id, status, currency, total_amount, payment_id, created_at, updated_at
+                FROM customer_order
+                """ + filter.sql() + """
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """, this::listed, pageArgs.toArray());
+        Map<UUID, List<ItemResponse>> items = sellerItems(rows, access.subject());
+        Map<UUID, List<HistoryResponse>> history = history(rows);
+        List<SellerSale> orders = new ArrayList<>();
+        for (ListedOrder row : rows) {
+            List<ItemResponse> lines = items.getOrDefault(row.id(), List.of());
+            BigDecimal sellerTotal = lines.stream().map(ItemResponse::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+            orders.add(new SellerSale(
+                    row.id(),
+                    row.customerId(),
+                    row.status(),
+                    row.currency(),
+                    sellerTotal,
+                    lines,
+                    history.getOrDefault(row.id(), List.of()),
+                    row.createdAt(),
+                    row.updatedAt()));
+        }
+        int totalPages = totalOrders == 0 ? 0 : (int) ((totalOrders + size - 1) / size);
+        BigDecimal sellerTotal = total.currencies() == 1 ? total.amount() : (totalOrders == 0 ? BigDecimal.ZERO : null);
+        String currency = total.currencies() == 1 ? total.currency() : null;
+        return new SellerSalesPage(orders, page, size, totalOrders, totalPages, sellerTotal, currency, pendingOrders);
+    }
+
+    private Map<UUID, List<ItemResponse>> sellerItems(List<ListedOrder> rows, String sellerId) {
+        Map<UUID, List<ItemResponse>> items = new HashMap<>();
+        if (rows.isEmpty()) {
+            return items;
+        }
+        String marks = String.join(",", java.util.Collections.nCopies(rows.size(), "?"));
+        List<Object> args = new ArrayList<>();
+        rows.forEach(row -> args.add(row.id()));
+        args.add(sellerId);
+        jdbc.query("""
+                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id
+                FROM order_item
+                WHERE order_id IN (%s) AND seller_id = ?
+                ORDER BY order_id, product_id
+                """.formatted(marks), (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    UUID orderId = rs.getObject("order_id", UUID.class);
+                    items.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(item(rs));
+                }, args.toArray());
+        return items;
+    }
+
+    private Map<UUID, List<HistoryResponse>> history(List<ListedOrder> rows) {
+        Map<UUID, List<HistoryResponse>> history = new HashMap<>();
+        if (rows.isEmpty()) {
+            return history;
+        }
+        String marks = String.join(",", java.util.Collections.nCopies(rows.size(), "?"));
+        Object[] ids = rows.stream().map(ListedOrder::id).toArray();
+        jdbc.query("""
+                SELECT order_id, status, created_at
+                FROM order_status_history
+                WHERE order_id IN (%s)
+                ORDER BY order_id, seq
+                """.formatted(marks), (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    UUID orderId = rs.getObject("order_id", UUID.class);
+                    history.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(new HistoryResponse(
+                            rs.getString("status"),
+                            rs.getTimestamp("created_at").toInstant()));
+                }, ids);
+        return history;
+    }
+
+    private static ItemResponse item(ResultSet rs) throws SQLException {
+        return new ItemResponse(
+                rs.getObject("product_id", UUID.class),
+                rs.getString("seller_id"),
+                rs.getString("sku"),
+                rs.getString("product_name"),
+                rs.getBigDecimal("unit_price"),
+                rs.getInt("quantity"),
+                rs.getBigDecimal("line_total"),
+                rs.getObject("reservation_id", UUID.class));
+    }
+
+    private static SaleFilter saleFilter(String sellerId, String status, String query) {
+        StringBuilder sql = new StringBuilder("""
+                WHERE EXISTS (
+                    SELECT 1 FROM order_item mine
+                    WHERE mine.order_id = customer_order.id AND mine.seller_id = ?
+                )
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(sellerId);
+        if (status != null) {
+            sql.append(" AND customer_order.status = ?");
+            args.add(status);
+        }
+        if (query != null) {
+            String pattern = like(query);
+            sql.append("""
+                     AND (
+                         LOWER(CAST(customer_order.id AS text)) LIKE ? ESCAPE '\\'
+                         OR EXISTS (
+                             SELECT 1 FROM order_item named
+                             WHERE named.order_id = customer_order.id
+                               AND named.seller_id = ?
+                               AND (LOWER(named.product_name) LIKE ? ESCAPE '\\'
+                                 OR LOWER(named.sku) LIKE ? ESCAPE '\\')
+                         )
+                     )
+                    """);
+            args.add(pattern);
+            args.add(sellerId);
+            args.add(pattern);
+            args.add(pattern);
+        }
+        return new SaleFilter(sql.toString(), args);
+    }
+
+    private static String like(String value) {
+        return "%" + value.toLowerCase(Locale.ROOT)
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_") + "%";
+    }
+
+    private record SaleFilter(String sql, List<Object> args) {
+        Object[] with(Object extra) {
+            List<Object> copy = new ArrayList<>(args);
+            copy.add(extra);
+            return copy.toArray();
+        }
+    }
+
+    private record SaleTotal(BigDecimal amount, int currencies, String currency) {
     }
 
     private ListedOrder listed(ResultSet rs, int row) throws SQLException {

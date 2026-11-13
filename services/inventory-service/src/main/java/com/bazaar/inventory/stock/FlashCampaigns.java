@@ -1,6 +1,8 @@
 package com.bazaar.inventory.stock;
 
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -79,6 +81,27 @@ class FlashCampaigns {
         if (changed != 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "The campaign cannot be cancelled.");
         }
+    }
+
+    List<CampaignResponse> list(String sellerId, Instant now) {
+        jdbc.update("""
+                UPDATE flash_campaign
+                SET status = 'ENDED', updated_at = ?
+                WHERE seller_id = ? AND status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= ?
+                """, Timestamp.from(now), sellerId, Timestamp.from(now));
+        jdbc.update("""
+                UPDATE flash_campaign
+                SET status = 'ACTIVE', updated_at = ?
+                WHERE seller_id = ? AND status = 'SCHEDULED' AND starts_at <= ? AND ends_at > ?
+                """, Timestamp.from(now), sellerId, Timestamp.from(now), Timestamp.from(now));
+        return jdbc.query("""
+                SELECT id, seller_id, product_id, price, currency, status, quota, remaining,
+                       per_customer_limit, starts_at, ends_at
+                FROM flash_campaign
+                WHERE seller_id = ?
+                ORDER BY starts_at DESC
+                LIMIT 50
+                """, this::row, sellerId);
     }
 
     CampaignResponse visible(InventoryAccess access, UUID id, Instant now) {
@@ -198,23 +221,26 @@ class FlashCampaigns {
                        per_customer_limit, starts_at, ends_at
                 FROM flash_campaign
                 WHERE id = ?
-                """, (rs, row) -> new CampaignResponse(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("seller_id"),
-                        rs.getObject("product_id", UUID.class),
-                        rs.getBigDecimal("price"),
-                        rs.getString("currency").trim(),
-                        rs.getString("status"),
-                        rs.getInt("quota"),
-                        rs.getInt("remaining"),
-                        rs.getInt("per_customer_limit"),
-                        rs.getTimestamp("starts_at").toInstant(),
-                        rs.getTimestamp("ends_at").toInstant()),
-                id);
+                """, this::row, id);
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaign was not found.");
         }
         return rows.getFirst();
+    }
+
+    private CampaignResponse row(ResultSet rs, int ignored) throws SQLException {
+        return new CampaignResponse(
+                rs.getObject("id", UUID.class),
+                rs.getString("seller_id"),
+                rs.getObject("product_id", UUID.class),
+                rs.getBigDecimal("price"),
+                rs.getString("currency").trim(),
+                rs.getString("status"),
+                rs.getInt("quota"),
+                rs.getInt("remaining"),
+                rs.getInt("per_customer_limit"),
+                rs.getTimestamp("starts_at").toInstant(),
+                rs.getTimestamp("ends_at").toInstant());
     }
 
     private Counts counts(UUID id) {

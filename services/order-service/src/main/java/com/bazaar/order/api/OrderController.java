@@ -12,11 +12,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.bazaar.order.checkout.CheckoutOutcome;
 import com.bazaar.order.checkout.CheckoutService;
 import com.bazaar.order.checkout.OrderResponse;
+import com.bazaar.order.checkout.SellerSalesPage;
 
 import jakarta.validation.Valid;
 
@@ -46,6 +48,16 @@ public class OrderController {
     @GetMapping
     public List<OrderResponse> list(@AuthenticationPrincipal Jwt jwt) {
         return checkout.list(jwt);
+    }
+
+    @GetMapping("/sales")
+    public SellerSalesPage sales(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String q) {
+        return checkout.sales(jwt, page, size, status, q);
     }
 
     @GetMapping("/{id}")

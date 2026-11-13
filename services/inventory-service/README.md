@@ -37,6 +37,8 @@ The process listens on port 8083 unless `SERVER_PORT` is set. A local run needs 
 | GET | `/api/v1/inventory/info` | Public | Service name, version, and status |
 | GET | `/api/v1/inventory/products/{productId}` | Bearer JWT | Available and reserved quantities |
 | PUT | `/api/v1/inventory/products/{productId}` | Seller owner or admin | Set on-hand stock. A seller must be `ACTIVE` in identity |
+| GET | `/api/v1/inventory/campaigns` | Seller | This seller's campaigns, at most 50. Listing does not require an active store |
+| POST | `/api/v1/inventory/campaigns` | Seller owner | Create a draft campaign. A seller must be `ACTIVE` in identity |
 | POST | `/api/v1/inventory/reservations` | Bearer JWT | Hold stock. Requires `Idempotency-Key`. Does not check seller status |
 | POST | `/api/v1/inventory/reservations/{id}/release` | Requester or admin | Return the hold to available stock |
 | POST | `/api/v1/inventory/reservations/{id}/commit` | Requester or admin | Keep the stock sold and clear the hold |

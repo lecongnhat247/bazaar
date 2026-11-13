@@ -8,6 +8,7 @@ flowchart TB
 
   subgraph clientHost [Published to the developer machine]
     storefront["storefront<br/>Next.js<br/>:3000"]
+    sellerCenter["seller-center<br/>Next.js<br/>:3002"]
     gateway["api-gateway<br/>Spring Cloud Gateway<br/>:8080"]
   end
 
@@ -21,9 +22,11 @@ flowchart TB
   end
 
   browser --> storefront
+  browser --> sellerCenter
   browser --> gateway
   browser -->|socket, cookie| notify
   storefront -->|API_GATEWAY_URL| gateway
+  sellerCenter -->|API_GATEWAY_URL| gateway
   storefront -->|NOTIFICATION_URL| notify
   gateway -->|/api/v1/identity/**| identity
   gateway -->|/api/v1/sellers/**| identity

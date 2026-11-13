@@ -46,6 +46,8 @@ Phase 4 M8 stops one Compose service at a time and runs one small flash sale. Ch
 
 Phase 5 M1 stores a seller and one store in the identity service. A new seller stays `PENDING_APPROVAL` until an administrator approves them. Catalog and inventory ask identity before a seller creates or publishes a product, sets stock, or opens a campaign. Checkout does not. The decision is [ADR-008](../adr/ADR-008-seller-profile-in-identity.md).
 
+Phase 5 M2 adds Seller Center at `apps/seller-center` on port 3002. It is a separate Next.js app with the same Keycloak cookie. It calls the gateway for the signed-in seller only. Sales return that seller's order lines and omit every other seller's lines. The kind chart does not include this app.
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.
