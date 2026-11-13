@@ -877,6 +877,15 @@ class OrderApplicationTests {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void onlyStaffCanMonitorOrders() throws Exception {
+        mockMvc.perform(get("/api/v1/orders/monitor").with(customer("buyer-monitor")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/monitor").with(operator("operator-monitor")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0));
+    }
+
     private static String body(UUID productId, int quantity, String outcome) {
         return "{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
                 + ",\"price\":1}],\"outcome\":\"" + outcome + "\"}";
@@ -897,6 +906,10 @@ class OrderApplicationTests {
 
     private static RequestPostProcessor admin(String subject) {
         return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("ADMIN"))));
+    }
+
+    private static RequestPostProcessor operator(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("OPERATOR"))));
     }
 
     private static HttpServer startDownstream() {

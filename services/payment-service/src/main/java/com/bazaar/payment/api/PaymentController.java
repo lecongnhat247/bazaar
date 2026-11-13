@@ -11,11 +11,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.bazaar.payment.pay.CreateOutcome;
 import com.bazaar.payment.pay.PaymentResponse;
 import com.bazaar.payment.pay.PaymentService;
+import com.bazaar.payment.pay.StaffPaymentPage;
 
 import jakarta.validation.Valid;
 
@@ -39,6 +41,15 @@ public class PaymentController {
             return ResponseEntity.status(201).body(outcome.payment());
         }
         return ResponseEntity.ok(outcome.payment());
+    }
+
+    @GetMapping("/monitor")
+    public StaffPaymentPage monitor(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String q) {
+        return payments.monitor(jwt, page, size, q);
     }
 
     @GetMapping("/{id}")

@@ -54,6 +54,14 @@ public class FlashSales {
         return campaigns.list(access.subject(), clock.instant());
     }
 
+    public List<CampaignResponse> monitor(Jwt jwt) {
+        InventoryAccess access = InventoryAccess.from(jwt);
+        if (!access.staff()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only staff can list every campaign.");
+        }
+        return campaigns.monitor(clock.instant());
+    }
+
     public CampaignResponse get(Jwt jwt, UUID id) {
         return campaigns.visible(InventoryAccess.from(jwt), id, clock.instant());
     }

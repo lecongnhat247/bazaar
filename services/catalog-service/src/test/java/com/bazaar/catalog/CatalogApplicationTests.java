@@ -564,6 +564,52 @@ class CatalogApplicationTests {
         assertThat(response.getBody()).containsEntry("error", "The product was changed by a concurrent update.");
     }
 
+    @Test
+    void adminModerationRequiresAReasonAndAnOperatorCannotWrite() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/products")
+                        .with(seller("seller-moderation"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(productJson("seller-moderation", "SKU-MOD-1", "12.00")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(patch("/api/v1/products/" + id + "/status")
+                        .with(token("operator-moderation", "OPERATOR"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"INACTIVE\",\"reason\":\"review\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(patch("/api/v1/products/" + id + "/status")
+                        .with(token("admin-moderation", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"INACTIVE\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/v1/products/" + id + "/status")
+                        .with(token("admin-moderation", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"INACTIVE\",\"reason\":\"not ready\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INACTIVE"));
+        mockMvc.perform(get("/api/v1/products/" + id + "/moderation").with(token("operator-moderation", "OPERATOR")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].reason").value("not ready"))
+                .andExpect(jsonPath("$[0].resultStatus").value("INACTIVE"));
+        mockMvc.perform(get("/api/v1/products/" + id + "/moderation").with(customer("customer-moderation")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/categories")
+                        .with(token("operator-moderation", "OPERATOR"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Staff only\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/categories")
+                        .with(token("admin-moderation", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Staff Desk\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.slug").value("staff-desk"));
+    }
+
     private static String productJson(String sellerId, String sku, String price) {
         return """
                 {"sellerId":"%s","categoryId":"8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d0002","name":"Sample %s","description":"A sample","sku":"%s","price":%s,"currency":"USD"}

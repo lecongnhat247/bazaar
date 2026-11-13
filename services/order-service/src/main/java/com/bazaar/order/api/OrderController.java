@@ -19,6 +19,7 @@ import com.bazaar.order.checkout.CheckoutOutcome;
 import com.bazaar.order.checkout.CheckoutService;
 import com.bazaar.order.checkout.OrderResponse;
 import com.bazaar.order.checkout.SellerSalesPage;
+import com.bazaar.order.checkout.StaffOrderPage;
 
 import jakarta.validation.Valid;
 
@@ -58,6 +59,15 @@ public class OrderController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String q) {
         return checkout.sales(jwt, page, size, status, q);
+    }
+
+    @GetMapping("/monitor")
+    public StaffOrderPage monitor(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String q) {
+        return checkout.monitor(jwt, page, size, q);
     }
 
     @GetMapping("/{id}")

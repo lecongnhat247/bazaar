@@ -41,6 +41,11 @@ public class CampaignController {
         return ResponseEntity.created(URI.create("/api/v1/inventory/campaigns/" + created.id())).body(created);
     }
 
+    @GetMapping("/monitor")
+    public List<CampaignResponse> monitor(@AuthenticationPrincipal Jwt jwt) {
+        return campaigns.monitor(jwt);
+    }
+
     @GetMapping("/{id}")
     public CampaignResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return campaigns.get(jwt, id);

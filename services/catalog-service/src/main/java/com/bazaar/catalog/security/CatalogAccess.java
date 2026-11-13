@@ -13,6 +13,14 @@ public record CatalogAccess(String subject, Set<String> roles) {
         return roles.contains("ADMIN");
     }
 
+    public boolean operator() {
+        return roles.contains("OPERATOR");
+    }
+
+    public boolean staff() {
+        return admin() || operator();
+    }
+
     public boolean seller() {
         return admin() || roles.contains("SELLER");
     }

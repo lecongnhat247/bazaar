@@ -48,6 +48,8 @@ Phase 5 M1 stores a seller and one store in the identity service. A new seller s
 
 Phase 5 M2 adds Seller Center at `apps/seller-center` on port 3002. It is a separate Next.js app with the same Keycloak cookie. It calls the gateway for the signed-in seller only. Sales return that seller's order lines and omit every other seller's lines. The kind chart does not include this app.
 
+Phase 5 M3 adds Admin Portal at `apps/admin-portal` on port 3003. ADMIN and OPERATOR can read the staff desk. Only ADMIN changes seller status, account status, categories, product status, or campaign schedule and cancel. OPERATOR cannot. The portal proxies only those staff routes. Account DISABLED is stored in identity and does not by itself block catalog, checkout, or payment. The kind chart does not include this app. The localhost cookie is shared with the shop and Seller Center, so signing in on one replaces the session on the others.
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

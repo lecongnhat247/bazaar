@@ -73,10 +73,46 @@ public class PaymentTransactions {
     @Transactional(readOnly = true)
     public PaymentResponse get(PaymentAccess access, UUID id) {
         PaymentRow row = required(id);
-        if (!row.payerId().equals(access.subject()) && !access.admin()) {
+        if (!row.payerId().equals(access.subject()) && !access.staff()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot read this payment.");
         }
         return load(id);
+    }
+
+    @Transactional(readOnly = true)
+    public StaffPaymentPage monitor(int page, int size, String query) {
+        String where = "";
+        List<Object> args = new java.util.ArrayList<>();
+        if (query != null) {
+            String like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            where = " WHERE id::text ILIKE ? ESCAPE '\\' OR order_id::text ILIKE ? ESCAPE '\\' OR payer_id ILIKE ? ESCAPE '\\' OR status ILIKE ? ESCAPE '\\'";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        long total = jdbc.queryForObject("SELECT COUNT(*) FROM payment" + where, Long.class, args.toArray());
+        List<Object> pageArgs = new java.util.ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add(page * (long) size);
+        List<PaymentSummary> items = jdbc.query("""
+                SELECT id, order_id, payer_id, amount, currency, status, created_at, updated_at
+                FROM payment
+                """ + where + """
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """, (rs, n) -> new PaymentSummary(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("order_id", UUID.class),
+                        rs.getString("payer_id"),
+                        rs.getBigDecimal("amount"),
+                        rs.getString("currency").trim(),
+                        rs.getString("status"),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at").toInstant()),
+                pageArgs.toArray());
+        int pages = total == 0 ? 0 : (int) ((total + size - 1) / size);
+        return new StaffPaymentPage(items, page, size, total, pages);
     }
 
     @Transactional

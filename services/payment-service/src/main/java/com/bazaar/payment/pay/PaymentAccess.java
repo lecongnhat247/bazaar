@@ -13,6 +13,14 @@ public record PaymentAccess(String subject, Set<String> roles) {
         return roles.contains("ADMIN");
     }
 
+    public boolean operator() {
+        return roles.contains("OPERATOR");
+    }
+
+    public boolean staff() {
+        return admin() || operator();
+    }
+
     public static PaymentAccess from(Jwt jwt) {
         return new PaymentAccess(jwt.getSubject(), rolesFrom(jwt));
     }

@@ -327,12 +327,40 @@ class PaymentApplicationTests {
         assertThat(events).isEqualTo(1);
     }
 
+    @Test
+    void staffCanMonitorPaymentsButAnOperatorCannotSimulateOne() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        MvcResult created = mockMvc.perform(post("/api/v1/payments")
+                        .with(customer("payer-monitor"))
+                        .header("Idempotency-Key", "pay-monitor-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(orderId, "8.00")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(get("/api/v1/payments/monitor").with(customer("payer-monitor")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/payments/monitor").with(operator("operator-monitor")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+        mockMvc.perform(get("/api/v1/payments/" + id).with(operator("operator-monitor")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+        mockMvc.perform(post("/api/v1/payments/" + id + "/simulate-success").with(operator("operator-monitor")))
+                .andExpect(status().isForbidden());
+    }
+
     private static String body(UUID orderId, String amount) {
         return "{\"orderId\":\"" + orderId + "\",\"amount\":" + amount + ",\"currency\":\"USD\"}";
     }
 
     private static RequestPostProcessor customer(String subject) {
         return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("CUSTOMER"))));
+    }
+
+    private static RequestPostProcessor operator(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("OPERATOR"))));
     }
 
     @TestConfiguration(proxyBeanMethods = false)

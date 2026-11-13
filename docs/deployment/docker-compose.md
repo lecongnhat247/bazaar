@@ -8,6 +8,7 @@ Compose runs the local stack on one Docker network named `bazaar`. Kubernetes us
 | --- | --- | --- | --- |
 | `bazaar-storefront` | `node:24.22.2-bookworm-slim` | 3000 | 3000 |
 | `bazaar-seller-center` | `node:24.22.2-bookworm-slim` | 3002 | 3000 |
+| `bazaar-admin-portal` | `node:24.22.2-bookworm-slim` | 3003 | 3000 |
 | `bazaar-api-gateway` | `eclipse-temurin:25.0.5_8-jre-noble` | 8080 | 8080 |
 | `bazaar-identity-service` | `eclipse-temurin:25.0.5_8-jre-noble` | 8081 | 8080 |
 | `bazaar-catalog-service` | `eclipse-temurin:25.0.5_8-jre-noble` | 8082 | 8080 |

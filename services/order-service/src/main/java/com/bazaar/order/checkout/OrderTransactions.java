@@ -275,6 +275,51 @@ class OrderTransactions {
         return new SellerSalesPage(orders, page, size, totalOrders, totalPages, sellerTotal, currency, pendingOrders);
     }
 
+    @Transactional(readOnly = true)
+    public StaffOrderPage monitor(int page, int size, String query) {
+        String where = "";
+        List<Object> args = new ArrayList<>();
+        if (query != null) {
+            String like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            where = " WHERE id::text ILIKE ? ESCAPE '\\' OR status ILIKE ? ESCAPE '\\' OR customer_id ILIKE ? ESCAPE '\\'";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        long total = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order" + where, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add(page * (long) size);
+        List<ListedOrder> rows = jdbc.query("""
+                SELECT id, customer_id, status, currency, total_amount, payment_id, created_at, updated_at
+                FROM customer_order
+                """ + where + """
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """, this::listed, pageArgs.toArray());
+        List<OrderResponse> items = new ArrayList<>();
+        for (ListedOrder row : rows) {
+            items.add(response(new OrderRow(
+                    row.id(),
+                    row.customerId(),
+                    row.status(),
+                    row.currency(),
+                    row.total(),
+                    null,
+                    null,
+                    row.paymentId(),
+                    List.of(),
+                    null,
+                    null,
+                    0,
+                    row.createdAt(),
+                    row.updatedAt(),
+                    null)));
+        }
+        int pages = total == 0 ? 0 : (int) ((total + size - 1) / size);
+        return new StaffOrderPage(items, page, size, total, pages);
+    }
+
     private Map<UUID, List<ItemResponse>> sellerItems(List<ListedOrder> rows, String sellerId) {
         Map<UUID, List<ItemResponse>> items = new HashMap<>();
         if (rows.isEmpty()) {

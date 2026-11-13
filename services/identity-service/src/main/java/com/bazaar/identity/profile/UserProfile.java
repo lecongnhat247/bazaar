@@ -88,6 +88,10 @@ public class UserProfile {
         return status;
     }
 
+    public void setStatus(AccountStatus status) {
+        this.status = status;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

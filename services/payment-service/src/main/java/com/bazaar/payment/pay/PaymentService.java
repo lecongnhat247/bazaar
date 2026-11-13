@@ -46,6 +46,20 @@ public class PaymentService {
         return transactions.get(PaymentAccess.from(jwt), id);
     }
 
+    public StaffPaymentPage monitor(Jwt jwt, int page, int size, String query) {
+        if (!PaymentAccess.from(jwt).staff()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only staff can monitor payments.");
+        }
+        if (page < 0 || size < 1 || size > 50) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page is invalid");
+        }
+        String normalized = query == null || query.isBlank() ? null : query.trim();
+        if (normalized != null && normalized.length() > 80) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "q is invalid");
+        }
+        return transactions.monitor(page, size, normalized);
+    }
+
     public PaymentResponse succeed(Jwt jwt, UUID id) {
         return transactions.change(PaymentAccess.from(jwt), id, "SUCCEEDED", "SIMULATE_SUCCESS", clock.instant());
     }

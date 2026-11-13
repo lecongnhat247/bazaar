@@ -136,6 +136,14 @@ public class CatalogCache {
         write(key, page);
     }
 
+    public void evictCategories() {
+        try {
+            redis.delete(categoryKey(0, 20));
+        } catch (RuntimeException exception) {
+            log.warn("Catalog category cache evict skipped: {}", exception.toString());
+        }
+    }
+
     private <T> T read(String key, Class<T> type) {
         String json = readJson(key);
         if (json == null) {

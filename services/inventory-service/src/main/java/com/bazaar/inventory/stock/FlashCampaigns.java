@@ -104,6 +104,26 @@ class FlashCampaigns {
                 """, this::row, sellerId);
     }
 
+    List<CampaignResponse> monitor(Instant now) {
+        jdbc.update("""
+                UPDATE flash_campaign
+                SET status = 'ENDED', updated_at = ?
+                WHERE status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= ?
+                """, Timestamp.from(now), Timestamp.from(now));
+        jdbc.update("""
+                UPDATE flash_campaign
+                SET status = 'ACTIVE', updated_at = ?
+                WHERE status = 'SCHEDULED' AND starts_at <= ? AND ends_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        return jdbc.query("""
+                SELECT id, seller_id, product_id, price, currency, status, quota, remaining,
+                       per_customer_limit, starts_at, ends_at
+                FROM flash_campaign
+                ORDER BY starts_at DESC
+                LIMIT 50
+                """, this::row);
+    }
+
     CampaignResponse visible(InventoryAccess access, UUID id, Instant now) {
         promote(id, now);
         CampaignResponse campaign = get(id);

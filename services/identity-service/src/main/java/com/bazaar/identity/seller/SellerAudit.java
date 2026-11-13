@@ -36,6 +36,34 @@ public class SellerAudit {
     protected SellerAudit() {
     }
 
+    public UUID getId() {
+        return id;
+    }
+
+    public String getActorSubject() {
+        return actorSubject;
+    }
+
+    public String getAction() {
+        return action;
+    }
+
+    public String getTargetSubject() {
+        return targetSubject;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public String getResultStatus() {
+        return resultStatus;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
     public SellerAudit(
             UUID id,
             String actorSubject,

@@ -34,4 +34,15 @@ public class Category {
     public String getSlug() {
         return slug;
     }
+
+    public Category(UUID id, String name, String slug) {
+        this.id = id;
+        this.name = name;
+        this.slug = slug;
+    }
+
+    public void rename(String name, String slug) {
+        this.name = name;
+        this.slug = slug;
+    }
 }

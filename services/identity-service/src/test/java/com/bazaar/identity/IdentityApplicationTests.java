@@ -318,6 +318,50 @@ class IdentityApplicationTests {
                 .andExpect(jsonPath("$.error").value("logoUrl is invalid"));
     }
 
+    @Test
+    void staffCanReadUsersButOnlyAnAdminCanChangeAnotherAccount() throws Exception {
+        mockMvc.perform(get("/api/v1/identity/me").with(customer("customer-staff")))
+                .andExpect(status().isOk());
+        MvcResult admin = mockMvc.perform(get("/api/v1/identity/me").with(role("admin-staff", "ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn();
+        String adminId = com.jayway.jsonpath.JsonPath.read(admin.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(get("/api/v1/identity/users").with(customer("customer-staff")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/identity/users").with(role("operator-staff", "OPERATOR")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)));
+        mockMvc.perform(get("/api/v1/identity/audit").with(role("operator-staff", "OPERATOR")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/api/v1/identity/users/" + adminId + "/status")
+                        .with(role("operator-staff", "OPERATOR"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"DISABLED\",\"reason\":\"no\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(patch("/api/v1/identity/users/" + adminId + "/status")
+                        .with(role("admin-staff", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"DISABLED\",\"reason\":\"self\"}"))
+                .andExpect(status().isForbidden());
+
+        String customerId = jdbc.queryForObject(
+                "SELECT id FROM user_profile WHERE keycloak_subject = ?",
+                String.class,
+                "customer-staff");
+        mockMvc.perform(patch("/api/v1/identity/users/" + customerId + "/status")
+                        .with(role("admin-staff", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"DISABLED\",\"reason\":\"review\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISABLED"));
+        mockMvc.perform(get("/api/v1/identity/audit").with(role("operator-staff", "OPERATOR")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].action").value("ACCOUNT_STATUS"))
+                .andExpect(jsonPath("$.items[0].reason").value("review"));
+    }
+
     private static String storeJson(String name) {
         return "{\"storeName\":\"" + name + "\"}";
     }

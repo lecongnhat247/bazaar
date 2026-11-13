@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -25,6 +26,20 @@ public class SellerController {
 
     public SellerController(SellerService sellers) {
         this.sellers = sellers;
+    }
+
+    @GetMapping
+    public StaffPage<SellerResponse> list(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return sellers.list(jwt, status, page, size);
+    }
+
+    @GetMapping("/{subject}")
+    public SellerResponse one(@AuthenticationPrincipal Jwt jwt, @PathVariable String subject) {
+        return sellers.getForStaff(jwt, subject(subject));
     }
 
     @PostMapping("/me")

@@ -109,6 +109,20 @@ public class CheckoutService {
         return transactions.sales(access, page, size, normalizedStatus, normalizedQuery);
     }
 
+    public StaffOrderPage monitor(Jwt jwt, int page, int size, String query) {
+        if (!access(jwt).staff()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only staff can monitor orders.");
+        }
+        if (page < 0 || size < 1 || size > 50) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page is invalid");
+        }
+        String normalized = blank(query);
+        if (normalized != null && normalized.length() > 80) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "q is invalid");
+        }
+        return transactions.monitor(page, size, normalized);
+    }
+
     private static String blank(String value) {
         if (value == null || value.isBlank()) {
             return null;

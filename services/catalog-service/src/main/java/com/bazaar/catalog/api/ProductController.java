@@ -2,6 +2,7 @@ package com.bazaar.catalog.api;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -77,6 +78,11 @@ public class ProductController {
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id,
             @Valid @RequestBody StatusRequest request) {
-        return products.changeStatus(jwt, id, request.status());
+        return products.changeStatus(jwt, id, request.status(), request.reason());
+    }
+
+    @GetMapping("/{id}/moderation")
+    public List<ModerationResponse> moderation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return products.moderation(jwt, id);
     }
 }

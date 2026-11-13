@@ -993,6 +993,14 @@ class InventoryApplicationTests {
         assertThat(negative).isZero();
     }
 
+    @Test
+    void onlyStaffCanMonitorEveryCampaign() throws Exception {
+        mockMvc.perform(get("/api/v1/inventory/campaigns/monitor").with(seller("seller-monitor")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/inventory/campaigns/monitor").with(operator("operator-monitor")))
+                .andExpect(status().isOk());
+    }
+
     private static String command(UUID eventId, UUID orderId, UUID productId, int quantity) {
         return """
                 {"eventId":"%s","eventType":"inventory.reservation-requested","eventVersion":1,"aggregateId":"%s","aggregateType":"command","occurredAt":"2026-11-08T00:00:00Z","correlationId":"%s","producer":"order-service","payload":{"orderId":"%s","customerId":"customer-command","items":[{"productId":"%s","quantity":%d}]}}
@@ -1005,6 +1013,10 @@ class InventoryApplicationTests {
 
     private static RequestPostProcessor seller(String subject) {
         return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("SELLER"))));
+    }
+
+    private static RequestPostProcessor operator(String subject) {
+        return jwt().jwt(builder -> builder.subject(subject).claim("realm_access", Map.of("roles", List.of("OPERATOR"))));
     }
 
     private static Jwt token(String subject, String role) {

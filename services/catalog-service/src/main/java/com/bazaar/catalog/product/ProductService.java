@@ -51,18 +51,21 @@ public class ProductService {
     private final OutboxStore outbox;
     private final CatalogCache cache;
     private final SellerStatusCheck sellers;
+    private final ProductModerationRepository moderation;
 
     public ProductService(
             ProductRepository products,
             CategoryRepository categories,
             OutboxStore outbox,
             CatalogCache cache,
-            SellerStatusCheck sellers) {
+            SellerStatusCheck sellers,
+            ProductModerationRepository moderation) {
         this.products = products;
         this.categories = categories;
         this.outbox = outbox;
         this.cache = cache;
         this.sellers = sellers;
+        this.moderation = moderation;
     }
 
     @Transactional
@@ -110,17 +113,32 @@ public class ProductService {
     }
 
     @Transactional
-    public ProductResponse changeStatus(Jwt jwt, UUID id, ProductStatus status) {
+    public ProductResponse changeStatus(Jwt jwt, UUID id, ProductStatus status, String reason) {
         Product product = editable(jwt, id);
+        CatalogAccess access = CatalogAccess.from(jwt);
         ProductStatus previous = product.getStatus();
-        if (status == ProductStatus.ACTIVE && previous != ProductStatus.ACTIVE && !CatalogAccess.from(jwt).admin()) {
+        if (status == ProductStatus.ACTIVE && previous != ProductStatus.ACTIVE && !access.admin()) {
             sellers.requireActive(jwt);
         }
         if (!previous.canTransitionTo(status)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "That status change is not allowed.");
         }
+        if (access.admin() && previous != status && (reason == null || reason.isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason is required");
+        }
+        Instant now = Instant.now();
         product.setStatus(status);
-        product.setUpdatedAt(Instant.now());
+        product.setUpdatedAt(now);
+        if (access.admin() && previous != status) {
+            moderation.save(new ProductModeration(
+                    UUID.randomUUID(),
+                    access.subject(),
+                    product.getId(),
+                    "STATUS",
+                    reason.trim(),
+                    status.name(),
+                    now));
+        }
         if (previous != status && status == ProductStatus.ACTIVE) {
             catalogEvent("catalog.product-published", product);
         } else if (previous == ProductStatus.ACTIVE && status != ProductStatus.ACTIVE) {
@@ -128,6 +146,20 @@ public class ProductService {
         }
         evictAfterCommit(product.getId());
         return ProductResponse.from(product);
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.bazaar.catalog.api.ModerationResponse> moderation(Jwt jwt, UUID id) {
+        CatalogAccess access = CatalogAccess.from(jwt);
+        if (!access.staff()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only staff can read moderation history.");
+        }
+        if (!products.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found.");
+        }
+        return moderation.findByProductIdOrderByCreatedAtDesc(id).stream()
+                .map(com.bazaar.catalog.api.ModerationResponse::from)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -142,7 +174,7 @@ public class ProductService {
         Product product = products.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found."));
         boolean owner = !access.subject().isEmpty() && product.getSellerId().equals(access.subject());
-        if (product.getStatus() != ProductStatus.ACTIVE && !access.admin() && !owner) {
+        if (product.getStatus() != ProductStatus.ACTIVE && !access.staff() && !owner) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found.");
         }
         ProductResponse response = ProductResponse.from(product);
@@ -170,7 +202,7 @@ public class ProductService {
         if (property == null || !DIRECTIONS.contains(search.direction())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sort is invalid");
         }
-        String listKey = access.admin() ? null : cache.publicListKey(search);
+        String listKey = access.staff() ? null : cache.publicListKey(search);
         if (listKey != null) {
             PageResponse<ProductResponse> cached = cache.list(listKey);
             if (cached != null) {
@@ -231,7 +263,7 @@ public class ProductService {
     }
 
     private static boolean canSeeNonActive(CatalogAccess access, ProductSearch search) {
-        return access.admin() || (search.mine() && access.seller());
+        return access.staff() || (search.mine() && access.seller());
     }
 
     private void evictAfterCommit(UUID productId) {

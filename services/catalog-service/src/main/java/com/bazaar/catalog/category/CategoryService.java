@@ -1,5 +1,9 @@
 package com.bazaar.catalog.category;
 
+import java.util.Locale;
+import java.util.UUID;
+
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -11,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.bazaar.catalog.api.CategoryResponse;
 import com.bazaar.catalog.api.PageResponse;
 import com.bazaar.catalog.cache.CatalogCache;
+import com.bazaar.catalog.security.CatalogAccess;
 
 @Service
 public class CategoryService {
@@ -48,5 +53,47 @@ public class CategoryService {
             cache.putCategories(key, response);
         }
         return response;
+    }
+
+    @Transactional
+    public CategoryResponse create(Jwt jwt, String name) {
+        if (!CatalogAccess.from(jwt).admin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only an administrator can change categories.");
+        }
+        String trimmed = name.trim();
+        Category category = new Category(UUID.randomUUID(), trimmed, slug(trimmed));
+        try {
+            categories.saveAndFlush(category);
+        } catch (DataIntegrityViolationException conflict) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A category with that name already exists.");
+        }
+        cache.evictCategories();
+        return new CategoryResponse(category.getId(), category.getName(), category.getSlug());
+    }
+
+    @Transactional
+    public CategoryResponse update(Jwt jwt, UUID id, String name) {
+        if (!CatalogAccess.from(jwt).admin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only an administrator can change categories.");
+        }
+        Category category = categories.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Category was not found."));
+        String trimmed = name.trim();
+        category.rename(trimmed, slug(trimmed));
+        try {
+            categories.saveAndFlush(category);
+        } catch (DataIntegrityViolationException conflict) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A category with that name already exists.");
+        }
+        cache.evictCategories();
+        return new CategoryResponse(category.getId(), category.getName(), category.getSlug());
+    }
+
+    private static String slug(String name) {
+        String slug = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        if (slug.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is invalid");
+        }
+        return slug.length() <= 80 ? slug : slug.substring(0, 80);
     }
 }

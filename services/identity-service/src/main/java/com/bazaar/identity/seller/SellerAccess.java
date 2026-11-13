@@ -7,17 +7,25 @@ import java.util.Set;
 
 import org.springframework.security.oauth2.jwt.Jwt;
 
-record SellerAccess(String subject, Set<String> roles) {
+public record SellerAccess(String subject, Set<String> roles) {
 
-    boolean seller() {
+    public boolean seller() {
         return roles.contains("SELLER");
     }
 
-    boolean admin() {
+    public boolean admin() {
         return roles.contains("ADMIN");
     }
 
-    static SellerAccess from(Jwt jwt) {
+    public boolean operator() {
+        return roles.contains("OPERATOR");
+    }
+
+    public boolean staff() {
+        return admin() || operator();
+    }
+
+    public static SellerAccess from(Jwt jwt) {
         return new SellerAccess(jwt.getSubject(), rolesFrom(jwt));
     }
 

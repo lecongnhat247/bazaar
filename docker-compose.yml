@@ -271,6 +271,25 @@ services:
     networks:
       - bazaar
 
+  admin-portal:
+    build:
+      context: .
+      dockerfile: apps/admin-portal/Dockerfile
+    image: bazaar-admin-portal
+    ports:
+      - "3003:3000"
+    environment:
+      API_GATEWAY_URL: http://api-gateway:8080
+      KEYCLOAK_PUBLIC_URL: http://localhost:8088
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
   notification-db-init:
     image: postgres:17.11-alpine
     depends_on:

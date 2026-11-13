@@ -1,0 +1,25 @@
+{
+  "name": "admin-portal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3003",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test src/lib/pkce.test.ts src/lib/return-path.test.ts src/lib/allow.test.ts src/lib/roles.test.ts"
+  },
+  "dependencies": {
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "typescript": "^5"
+  }
+}
