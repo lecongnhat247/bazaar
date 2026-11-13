@@ -36,8 +36,15 @@ The process listens on port 8081 unless `SERVER_PORT` is set. A local run needs 
 | GET | `/api/v1/identity/me` | Bearer JWT | Create or return the caller's profile |
 | PATCH | `/api/v1/identity/me` | Bearer JWT | Change `displayName` |
 | GET | `/api/v1/identity/users/{id}` | Bearer JWT | Caller, or an `ADMIN`, reads one profile |
+| POST | `/api/v1/sellers/me` | Seller JWT | Open one store at `PENDING_APPROVAL` |
+| GET | `/api/v1/sellers/me` | Bearer JWT | The caller's seller and store |
+| PATCH | `/api/v1/sellers/me/store` | Seller JWT | Edit the store while it is pending or active |
+| POST | `/api/v1/sellers/{subject}/approve` | Admin JWT | `PENDING_APPROVAL` to `ACTIVE` |
+| POST | `/api/v1/sellers/{subject}/reject` | Admin JWT | `PENDING_APPROVAL` to `REJECTED` |
+| POST | `/api/v1/sellers/{subject}/suspend` | Admin JWT | `ACTIVE` to `SUSPENDED` |
+| POST | `/api/v1/sellers/{subject}/reactivate` | Admin JWT | `SUSPENDED` to `ACTIVE` |
 
-The first `GET /me` inserts the profile. A second call returns the same id. Roles copied from the token are only `CUSTOMER`, `SELLER`, `ADMIN`, and `OPERATOR`.
+The first `GET /me` inserts the profile. A second call returns the same id. Roles copied from the token are only `CUSTOMER`, `SELLER`, `ADMIN`, and `OPERATOR`. A seller id in a moderation path is the Keycloak subject. The caller cannot moderate their own subject. `OPERATOR` is not an administrator. The imported local seller `11111111-1111-4111-8111-111111111111` is seeded `ACTIVE`.
 
 ## Configuration
 

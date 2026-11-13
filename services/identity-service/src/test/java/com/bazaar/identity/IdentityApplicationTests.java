@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +23,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -38,6 +40,9 @@ class IdentityApplicationTests {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @Test
     void applicationContextStarts() {
@@ -139,6 +144,192 @@ class IdentityApplicationTests {
                         .content("{\"displayName\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("displayName is invalid"));
+    }
+
+    @Test
+    void seededSellerIsActive() throws Exception {
+        mockMvc.perform(get("/api/v1/sellers/me").with(seller("11111111-1111-4111-8111-111111111111")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.storeName").value("Local Seller"));
+    }
+
+    @Test
+    void customerCannotOpenAStore() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(customer("customer-store"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Customer Shop")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Only a seller can open a store."));
+    }
+
+    @Test
+    void sellerOpensOnePendingStoreAndCannotApproveIt() throws Exception {
+        mockMvc.perform(get("/api/v1/sellers/me").with(seller("seller-new")))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-new"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("New Store")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.keycloakSubject").value("seller-new"))
+                .andExpect(jsonPath("$.storeName").value("New Store"));
+
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-new"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("New Store")))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-new/approve")
+                        .with(seller("seller-new"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"mine\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Only an administrator can change seller status."));
+    }
+
+    @Test
+    void operatorCannotApproveAndSellerCannotApproveAnotherSeller() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-other"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Other Store")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-other/approve")
+                        .with(role("operator-1", "OPERATOR"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"ops\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-other/approve")
+                        .with(seller("seller-new"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"nope\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminCannotChangeTheirOwnSellerStatus() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("admin-self"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Admin Store")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/sellers/admin-self/approve")
+                        .with(admin("admin-self"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"self\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("You cannot change your own seller status."));
+    }
+
+    @Test
+    void adminApprovesSuspendsAndReactivates() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Life Store")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-life/approve")
+                        .with(admin("admin-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"looks real\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        Integer audits = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM seller_audit WHERE target_subject = ? AND action = 'APPROVE' AND actor_subject = ?",
+                Integer.class,
+                "seller-life",
+                "admin-life");
+        assertThat(audits).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/sellers/seller-life/approve")
+                        .with(admin("admin-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"again\"}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-life/suspend")
+                        .with(admin("admin-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"hold\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUSPENDED"));
+
+        mockMvc.perform(patch("/api/v1/sellers/me/store")
+                        .with(seller("seller-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Renamed")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("This store cannot be edited."));
+
+        mockMvc.perform(post("/api/v1/sellers/seller-life/reactivate")
+                        .with(admin("admin-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"clear\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        mockMvc.perform(patch("/api/v1/sellers/me/store")
+                        .with(seller("seller-life"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Life Store Again")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.storeName").value("Life Store Again"));
+    }
+
+    @Test
+    void adminRejectsAPendingStore() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-reject"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Rejected Store")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/sellers/seller-reject/reject")
+                        .with(admin("admin-reject"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"incomplete\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        mockMvc.perform(patch("/api/v1/sellers/me/store")
+                        .with(seller("seller-reject"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeJson("Try again")))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void invalidLogoIsRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/sellers/me")
+                        .with(seller("seller-logo"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"storeName\":\"Logo\",\"logoUrl\":\"javascript:alert(1)\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("logoUrl is invalid"));
+    }
+
+    private static String storeJson(String name) {
+        return "{\"storeName\":\"" + name + "\"}";
+    }
+
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor seller(String subject) {
+        return role(subject, "SELLER");
+    }
+
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor role(String subject, String roleName) {
+        return jwt().jwt(token -> token
+                .subject(subject)
+                .claim("realm_access", Map.of("roles", List.of(roleName))));
     }
 
     private static org.springframework.test.web.servlet.request.RequestPostProcessor customer(String subject) {

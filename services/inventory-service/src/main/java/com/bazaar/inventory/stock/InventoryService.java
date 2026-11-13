@@ -16,6 +16,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.inventory.seller.SellerStatusCheck;
+
 @Service
 public class InventoryService {
 
@@ -23,22 +25,28 @@ public class InventoryService {
     private final InventoryMetrics metrics;
     private final Clock clock;
     private final Duration ttl;
+    private final SellerStatusCheck sellers;
 
     public InventoryService(
             InventoryTransactions transactions,
             InventoryMetrics metrics,
             Clock clock,
-            @Value("${bazaar.inventory.reservation-ttl:PT15M}") Duration ttl) {
+            @Value("${bazaar.inventory.reservation-ttl:PT15M}") Duration ttl,
+            SellerStatusCheck sellers) {
         this.transactions = transactions;
         this.metrics = metrics;
         this.clock = clock;
         this.ttl = ttl;
+        this.sellers = sellers;
     }
 
     public StockResponse setOnHand(Jwt jwt, UUID productId, int onHand) {
         InventoryAccess access = InventoryAccess.from(jwt);
         if (!access.seller()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a seller can change stock.");
+        }
+        if (!access.admin()) {
+            sellers.requireActive(jwt);
         }
         if (onHand < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "onHand is invalid");

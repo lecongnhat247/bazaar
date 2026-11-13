@@ -1,6 +1,8 @@
 package com.bazaar.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -44,6 +46,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -53,6 +56,7 @@ import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.bazaar.inventory.messaging.CommandConsumer;
+import com.bazaar.inventory.seller.SellerStatusCheck;
 import com.bazaar.inventory.messaging.ServiceEventConsumer;
 import com.bazaar.inventory.outbox.OutboxPublisher;
 import com.bazaar.inventory.stock.InventoryTransactions.Requested;
@@ -97,6 +101,9 @@ class InventoryApplicationTests {
 
     @Autowired
     private CommandConsumer commands;
+
+    @MockitoBean
+    private SellerStatusCheck sellerStatus;
 
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
@@ -901,6 +908,32 @@ class InventoryApplicationTests {
                 .andExpect(jsonPath("$.held").value(3))
                 .andExpect(jsonPath("$.committed").value(0))
                 .andExpect(jsonPath("$.balanced").value(true));
+    }
+
+    @Test
+    void inactiveSellerCannotSetStockOrCreateACampaign() throws Exception {
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "Seller is not active."))
+                .when(sellerStatus).requireActive(any());
+        UUID productId = UUID.randomUUID();
+
+        mockMvc.perform(put("/api/v1/inventory/products/" + productId)
+                        .with(seller("seller-inactive"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"onHand\":4}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Seller is not active."));
+
+        String windowStart = Instant.now().minusSeconds(60).toString();
+        String windowEnd = Instant.now().plusSeconds(3600).toString();
+        mockMvc.perform(post("/api/v1/inventory/campaigns")
+                        .with(seller("seller-inactive"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"%s","price":9.00,"currency":"USD","quota":5,"perCustomerLimit":2,"startsAt":"%s","endsAt":"%s"}
+                                """.formatted(productId, windowStart, windowEnd)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Seller is not active."));
     }
 
     private UUID campaign(String seller, UUID productId, int onHand, int quota, int limit) throws Exception {

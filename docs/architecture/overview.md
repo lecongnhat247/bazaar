@@ -44,6 +44,8 @@ Phase 4 M7 scans dependencies and images in GitHub Actions, publishes an immutab
 
 Phase 4 M8 stops one Compose service at a time and runs one small flash sale. Checkout does not create an order while catalog is down. A checkout accepted while Kafka is down is confirmed after the broker returns, and the same key does not pay twice. The notes are in [the M8 chaos report](../performance/m8-chaos.md).
 
+Phase 5 M1 stores a seller and one store in the identity service. A new seller stays `PENDING_APPROVAL` until an administrator approves them. Catalog and inventory ask identity before a seller creates or publishes a product, sets stock, or opens a campaign. Checkout does not. The decision is [ADR-008](../adr/ADR-008-seller-profile-in-identity.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

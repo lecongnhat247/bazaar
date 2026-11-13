@@ -83,6 +83,7 @@ bazaar:
     events-topic: ${INVENTORY_EVENTS_TOPIC:bazaar.inventory.events}
     commands-topic: ${INVENTORY_COMMANDS_TOPIC:bazaar.inventory.commands}
     reservation-ttl: ${INVENTORY_RESERVATION_TTL:PT15M}
+    identity-url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
   security:
     jwt:
       remote: true

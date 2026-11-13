@@ -300,6 +300,7 @@ public class InventoryTransactions {
         if ("RELEASED".equals(current.status()) || "EXPIRED".equals(current.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This reservation is no longer held.");
         }
+        lockProduct(current.productId());
         int changed = jdbc.update("""
                 UPDATE stock_reservation
                 SET status = 'COMMITTED', updated_at = ?

@@ -26,6 +26,7 @@ flowchart TB
   storefront -->|API_GATEWAY_URL| gateway
   storefront -->|NOTIFICATION_URL| notify
   gateway -->|/api/v1/identity/**| identity
+  gateway -->|/api/v1/sellers/**| identity
   gateway -->|/api/v1/catalog/**| catalog
   gateway -->|/api/v1/categories/**| catalog
   gateway -->|/api/v1/products/**| catalog
@@ -41,6 +42,7 @@ The ports in the internal tier are container ports. On a laptop, the Java proces
 | External path | Target |
 | --- | --- |
 | `/api/v1/identity/**` | `IDENTITY_SERVICE_URL` |
+| `/api/v1/sellers/**` | `IDENTITY_SERVICE_URL` |
 | `/api/v1/catalog/**` | `CATALOG_SERVICE_URL` |
 | `/api/v1/categories/**` | `CATALOG_SERVICE_URL` |
 | `/api/v1/products/**` | `CATALOG_SERVICE_URL` |

@@ -36,9 +36,9 @@ The process listens on port 8082 unless `SERVER_PORT` is set. A local run needs 
 | GET | `/api/v1/categories` | Public | List categories |
 | GET | `/api/v1/products` | Public | Search active products. A signed-in seller passes `mine=true` to see their own drafts |
 | GET | `/api/v1/products/{id}` | Public | One active product. Drafts are visible to the owner and an admin |
-| POST | `/api/v1/products` | Seller or admin | Create a draft. The seller id is the token subject |
+| POST | `/api/v1/products` | Seller or admin | Create a draft. The seller id is the token subject. A seller must be `ACTIVE` in identity |
 | PUT | `/api/v1/products/{id}` | Owner or admin | Replace the editable fields. Status stays unchanged |
-| PATCH | `/api/v1/products/{id}/status` | Owner or admin | Move among `DRAFT`, `ACTIVE`, `INACTIVE`, and `ARCHIVED` |
+| PATCH | `/api/v1/products/{id}/status` | Owner or admin | Move among `DRAFT`, `ACTIVE`, `INACTIVE`, and `ARCHIVED`. Publishing requires an `ACTIVE` seller |
 
 List parameters are `page`, `size` (max 50), `sort` (`createdAt`, `name`, `price`), `direction` (`asc` or `desc`), `q`, `categoryId`, `minPrice`, `maxPrice`, `status`, and `mine`. Customers always receive `ACTIVE` products. A new product starts as `DRAFT`. `ARCHIVED` is final.
 
@@ -52,6 +52,7 @@ List parameters are `page`, `size` (max 50), `sort` (`createdAt`, `name`, `price
 | `DB_PASSWORD` | `catalog_local` | Local database password |
 | `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
 | `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
+| `IDENTITY_SERVICE_URL` | `http://localhost:8081` | Seller status check for creates and publishing |
 
 ## Versions
 

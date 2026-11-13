@@ -38,6 +38,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -48,6 +49,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.bazaar.catalog.messaging.ServiceEventConsumer;
 import com.bazaar.catalog.outbox.OutboxPublisher;
+import com.bazaar.catalog.seller.SellerStatusCheck;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(properties = {"bazaar.security.jwt.remote=false", "bazaar.outbox.poll-delay=3600000"})
 @AutoConfigureMockMvc
@@ -88,6 +95,9 @@ class CatalogApplicationTests {
 
     @Autowired
     private tools.jackson.databind.ObjectMapper objectMapper;
+
+    @MockitoBean
+    private SellerStatusCheck sellerStatus;
 
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
@@ -201,6 +211,46 @@ class CatalogApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sku").value("SKU-OWNER-1B"))
                 .andExpect(jsonPath("$.sellerId").value("seller-a"));
+    }
+
+    @Test
+    void inactiveSellerCannotCreateAProduct() throws Exception {
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                HttpStatus.FORBIDDEN, "Seller is not active."))
+                .when(sellerStatus).requireActive(any());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .with(seller("seller-inactive"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(productJson("seller-inactive", "SKU-INACTIVE-1", "10.00")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Seller is not active."));
+    }
+
+    @Test
+    void identityOutageRejectsProductCreate() throws Exception {
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE, "Seller status could not be verified."))
+                .when(sellerStatus).requireActive(any());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .with(seller("seller-down"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(productJson("seller-down", "SKU-DOWN-1", "10.00")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Seller status could not be verified."));
+    }
+
+    @Test
+    void adminCreatesAProductWithoutAskingIdentity() throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                        .with(token("admin-catalog", "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(productJson("ignored", "SKU-ADMIN-1", "11.00")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sellerId").value("admin-catalog"));
+
+        verify(sellerStatus, never()).requireActive(any());
     }
 
     @Test

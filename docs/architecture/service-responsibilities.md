@@ -32,6 +32,8 @@ Phase 1 exposes `GET /actuator/health` and `GET /api/v1/identity/info`. Both sta
 
 Phase 2 stores a profile for the Keycloak subject and the application roles `CUSTOMER`, `SELLER`, `ADMIN`, and `OPERATOR`. `GET /api/v1/identity/me` requires a bearer token. Login and password storage stay in Keycloak.
 
+Phase 5 stores one seller profile and one store for a Keycloak subject. The seller starts at `PENDING_APPROVAL`. An administrator approves, rejects, suspends, or reactivates that seller and each decision is written to `seller_audit`. The actor cannot change their own seller status. `OPERATOR` cannot. Catalog and inventory call `GET /api/v1/sellers/me` before the seller writes a product, stock level, or campaign. They do not read `identity_db`. A missing or non-`ACTIVE` seller is refused. If identity does not answer, the write is refused. Checkout and public catalog reads do not call this check.
+
 ## Catalog Service
 
 | | |

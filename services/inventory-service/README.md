@@ -36,8 +36,8 @@ The process listens on port 8083 unless `SERVER_PORT` is set. A local run needs 
 | GET | `/actuator/health` | Public | Process health |
 | GET | `/api/v1/inventory/info` | Public | Service name, version, and status |
 | GET | `/api/v1/inventory/products/{productId}` | Bearer JWT | Available and reserved quantities |
-| PUT | `/api/v1/inventory/products/{productId}` | Seller owner or admin | Set on-hand stock. The seller id comes from the token |
-| POST | `/api/v1/inventory/reservations` | Bearer JWT | Hold stock. Requires `Idempotency-Key` |
+| PUT | `/api/v1/inventory/products/{productId}` | Seller owner or admin | Set on-hand stock. A seller must be `ACTIVE` in identity |
+| POST | `/api/v1/inventory/reservations` | Bearer JWT | Hold stock. Requires `Idempotency-Key`. Does not check seller status |
 | POST | `/api/v1/inventory/reservations/{id}/release` | Requester or admin | Return the hold to available stock |
 | POST | `/api/v1/inventory/reservations/{id}/commit` | Requester or admin | Keep the stock sold and clear the hold |
 
@@ -55,6 +55,7 @@ Hold states are `HELD`, `COMMITTED`, `RELEASED`, and `EXPIRED`.
 | `DB_PASSWORD` | `inventory_local` | Local database password |
 | `KEYCLOAK_ISSUER_URI` | `http://localhost:8088/realms/bazaar` | Expected `iss` claim |
 | `KEYCLOAK_JWK_SET_URI` | issuer certs URL | Signing keys |
+| `IDENTITY_SERVICE_URL` | `http://localhost:8081` | Seller status check for stock edits and new campaigns |
 | `INVENTORY_RESERVATION_TTL` | `PT15M` | How long a hold lasts |
 
 ## Versions

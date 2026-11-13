@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import com.bazaar.inventory.api.CampaignReconcile;
 import com.bazaar.inventory.api.CampaignRequest;
 import com.bazaar.inventory.api.CampaignResponse;
+import com.bazaar.inventory.seller.SellerStatusCheck;
 
 @Service
 public class FlashSales {
@@ -16,14 +17,20 @@ public class FlashSales {
     private final FlashCampaigns campaigns;
     private final InventoryTransactions transactions;
     private final Clock clock;
+    private final SellerStatusCheck sellers;
 
-    public FlashSales(FlashCampaigns campaigns, InventoryTransactions transactions, Clock clock) {
+    public FlashSales(FlashCampaigns campaigns, InventoryTransactions transactions, Clock clock, SellerStatusCheck sellers) {
         this.campaigns = campaigns;
         this.transactions = transactions;
         this.clock = clock;
+        this.sellers = sellers;
     }
 
     public CampaignResponse create(Jwt jwt, CampaignRequest request) {
+        InventoryAccess access = InventoryAccess.from(jwt);
+        if (access.seller() && !access.admin()) {
+            sellers.requireActive(jwt);
+        }
         return campaigns.create(
                 InventoryAccess.from(jwt),
                 request.productId(),

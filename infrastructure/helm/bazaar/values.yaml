@@ -118,6 +118,7 @@ applications:
       cpu: false
     env:
       - SERVER_PORT
+      - IDENTITY_SERVICE_URL
   inventory-service:
     image: bazaar-inventory-service
     port: 8080
@@ -128,6 +129,7 @@ applications:
       cpu: false
     env:
       - SERVER_PORT
+      - IDENTITY_SERVICE_URL
   order-service:
     image: bazaar-order-service
     port: 8080

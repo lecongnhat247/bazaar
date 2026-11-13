@@ -88,6 +88,7 @@ bazaar:
   catalog:
     events-topic: ${CATALOG_EVENTS_TOPIC:bazaar.catalog.events}
     cache-ttl: ${CATALOG_CACHE_TTL:60s}
+    identity-url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
   security:
     jwt:
       remote: true

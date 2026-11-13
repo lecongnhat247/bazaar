@@ -34,6 +34,10 @@ spring:
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:
                 - Path=/api/v1/identity/**
+            - id: sellers
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/sellers/**
             - id: catalog
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:

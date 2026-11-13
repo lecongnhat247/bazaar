@@ -33,6 +33,7 @@ import com.bazaar.catalog.category.Category;
 import com.bazaar.catalog.category.CategoryRepository;
 import com.bazaar.catalog.outbox.OutboxStore;
 import com.bazaar.catalog.security.CatalogAccess;
+import com.bazaar.catalog.seller.SellerStatusCheck;
 
 import jakarta.persistence.criteria.Predicate;
 
@@ -49,16 +50,19 @@ public class ProductService {
     private final CategoryRepository categories;
     private final OutboxStore outbox;
     private final CatalogCache cache;
+    private final SellerStatusCheck sellers;
 
     public ProductService(
             ProductRepository products,
             CategoryRepository categories,
             OutboxStore outbox,
-            CatalogCache cache) {
+            CatalogCache cache,
+            SellerStatusCheck sellers) {
         this.products = products;
         this.categories = categories;
         this.outbox = outbox;
         this.cache = cache;
+        this.sellers = sellers;
     }
 
     @Transactional
@@ -66,6 +70,9 @@ public class ProductService {
         CatalogAccess access = CatalogAccess.from(jwt);
         if (!access.seller()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a seller can create a product.");
+        }
+        if (!access.admin()) {
+            sellers.requireActive(jwt);
         }
         Product product = new Product(
                 UUID.randomUUID(),
@@ -106,6 +113,9 @@ public class ProductService {
     public ProductResponse changeStatus(Jwt jwt, UUID id, ProductStatus status) {
         Product product = editable(jwt, id);
         ProductStatus previous = product.getStatus();
+        if (status == ProductStatus.ACTIVE && previous != ProductStatus.ACTIVE && !CatalogAccess.from(jwt).admin()) {
+            sellers.requireActive(jwt);
+        }
         if (!previous.canTransitionTo(status)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "That status change is not allowed.");
         }
