@@ -20,6 +20,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.bazaar.order.market.Allocation;
+import com.bazaar.order.market.Coupons;
+import com.bazaar.order.market.FulfillmentView;
+import com.bazaar.order.market.Fulfillments;
+import com.bazaar.order.market.Ledger;
+import com.bazaar.order.market.PricedLine;
 import com.bazaar.order.outbox.OutboxStore;
 
 @Service
@@ -28,6 +34,9 @@ class OrderTransactions {
     private final JdbcTemplate jdbc;
     private final OutboxStore outbox;
     private final CheckoutMetrics metrics;
+    private final Coupons coupons;
+    private final Fulfillments fulfillments;
+    private final Ledger ledger;
     private final String orderTopic;
     private final String inventoryCommands;
     private final String paymentCommands;
@@ -36,12 +45,18 @@ class OrderTransactions {
             JdbcTemplate jdbc,
             OutboxStore outbox,
             CheckoutMetrics metrics,
+            Coupons coupons,
+            Fulfillments fulfillments,
+            Ledger ledger,
             @Value("${bazaar.order.events-topic}") String orderTopic,
             @Value("${bazaar.order.inventory-commands-topic}") String inventoryCommands,
             @Value("${bazaar.order.payment-commands-topic}") String paymentCommands) {
         this.jdbc = jdbc;
         this.outbox = outbox;
         this.metrics = metrics;
+        this.coupons = coupons;
+        this.fulfillments = fulfillments;
+        this.ledger = ledger;
         this.orderTopic = orderTopic;
         this.inventoryCommands = inventoryCommands;
         this.paymentCommands = paymentCommands;
@@ -66,24 +81,34 @@ class OrderTransactions {
             BigDecimal total,
             List<Line> lines,
             Instant now,
-            UUID campaignId) {
+            UUID campaignId,
+            String couponCode) {
         UUID id = UUID.randomUUID();
+        // The server prices the coupon; the browser only ever supplies a code.
+        Allocation allocation = coupons.apply(couponCode, access.subject(), currency,
+                lines.stream().map(line -> new PricedLine(line.sellerId(), line.lineTotal())).toList(),
+                campaignId != null, now);
+        BigDecimal payable = total.subtract(allocation.total());
         jdbc.update("""
                 INSERT INTO customer_order (
                     id, customer_id, status, currency, total_amount, outcome,
-                    idempotency_key, request_hash, payment_state, created_at, updated_at, campaign_id)
-                VALUES (?, ?, 'PENDING_INVENTORY', ?, ?, ?, ?, ?, 'NONE', ?, ?, ?)
-                """, id, access.subject(), currency, total, outcome, key, hash,
-                Timestamp.from(now), Timestamp.from(now), campaignId);
-        for (Line line : lines) {
+                    idempotency_key, request_hash, payment_state, created_at, updated_at, campaign_id,
+                    discount_total, coupon_code)
+                VALUES (?, ?, 'PENDING_INVENTORY', ?, ?, ?, ?, ?, 'NONE', ?, ?, ?, ?, ?)
+                """, id, access.subject(), currency, payable, outcome, key, hash,
+                Timestamp.from(now), Timestamp.from(now), campaignId, allocation.total(), allocation.code());
+        for (int index = 0; index < lines.size(); index++) {
+            Line line = lines.get(index);
             jdbc.update("""
                     INSERT INTO order_item (
                         id, order_id, product_id, seller_id, sku, product_name,
-                        unit_price, quantity, line_total, reservation_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        unit_price, quantity, line_total, reservation_id, discount_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, UUID.randomUUID(), id, line.productId(), line.sellerId(), line.sku(), line.name(),
-                    line.unitPrice(), line.quantity(), line.lineTotal(), line.reservationId());
+                    line.unitPrice(), line.quantity(), line.lineTotal(), line.reservationId(),
+                    allocation.perLine().get(index));
         }
+        coupons.redeem(id, access.subject(), allocation, now);
         history(id, "PENDING_INVENTORY", 1, now);
         fact(id, "order.pending-inventory", "PENDING_INVENTORY", now);
         command(inventoryCommands, "inventory.reservation-requested", id.toString(), id,
@@ -118,6 +143,7 @@ class OrderTransactions {
             if (type != null) {
                 fact(orderId, type, status, now);
             }
+            settle(orderId, status, now);
         }
         OrderRow latest = required(orderId);
         if (!status.equals(latest.status())) {
@@ -161,22 +187,17 @@ class OrderTransactions {
         Object[] ids = rows.stream().map(ListedOrder::id).toArray();
         Map<UUID, List<ItemResponse>> items = new HashMap<>();
         jdbc.query("""
-                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id
+                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total,
+                       reservation_id, discount_amount
                 FROM order_item
                 WHERE order_id IN (%s)
                 ORDER BY order_id, product_id
                 """.formatted(marks), (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                     UUID orderId = rs.getObject("order_id", UUID.class);
-                    items.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(new ItemResponse(
-                            rs.getObject("product_id", UUID.class),
-                            rs.getString("seller_id"),
-                            rs.getString("sku"),
-                            rs.getString("product_name"),
-                            rs.getBigDecimal("unit_price"),
-                            rs.getInt("quantity"),
-                            rs.getBigDecimal("line_total"),
-                            rs.getObject("reservation_id", UUID.class)));
+                    items.computeIfAbsent(orderId, ignored -> new ArrayList<>()).add(item(rs));
                 }, ids);
+        Map<UUID, Discount> discounts = discounts(rows.stream().map(ListedOrder::id).toList());
+        Map<UUID, List<FulfillmentView>> groups = fulfillments.forOrders(rows.stream().map(ListedOrder::id).toList(), null);
         Map<UUID, List<HistoryResponse>> history = new HashMap<>();
         jdbc.query("""
                 SELECT order_id, status, created_at
@@ -201,7 +222,11 @@ class OrderTransactions {
                     items.getOrDefault(row.id(), List.of()),
                     history.getOrDefault(row.id(), List.of()),
                     row.createdAt(),
-                    row.updatedAt()));
+                    row.updatedAt(),
+                    discounts.getOrDefault(row.id(), Discount.NONE).total(),
+                    discounts.getOrDefault(row.id(), Discount.NONE).code(),
+                    Fulfillments.summary(groups.get(row.id())),
+                    groups.getOrDefault(row.id(), List.of())));
         }
         return orders;
     }
@@ -254,10 +279,14 @@ class OrderTransactions {
                 """, this::listed, pageArgs.toArray());
         Map<UUID, List<ItemResponse>> items = sellerItems(rows, access.subject());
         Map<UUID, List<HistoryResponse>> history = history(rows);
+        Map<UUID, List<FulfillmentView>> groups = fulfillments.forOrders(
+                rows.stream().map(ListedOrder::id).toList(), access.subject());
         List<SellerSale> orders = new ArrayList<>();
         for (ListedOrder row : rows) {
             List<ItemResponse> lines = items.getOrDefault(row.id(), List.of());
             BigDecimal sellerTotal = lines.stream().map(ItemResponse::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal sellerDiscount = lines.stream().map(ItemResponse::discount).reduce(BigDecimal.ZERO, BigDecimal::add);
+            List<FulfillmentView> own = groups.getOrDefault(row.id(), List.of());
             orders.add(new SellerSale(
                     row.id(),
                     row.customerId(),
@@ -267,7 +296,9 @@ class OrderTransactions {
                     lines,
                     history.getOrDefault(row.id(), List.of()),
                     row.createdAt(),
-                    row.updatedAt()));
+                    row.updatedAt(),
+                    sellerDiscount,
+                    own.isEmpty() ? null : own.getFirst()));
         }
         int totalPages = totalOrders == 0 ? 0 : (int) ((totalOrders + size - 1) / size);
         BigDecimal sellerTotal = total.currencies() == 1 ? total.amount() : (totalOrders == 0 ? BigDecimal.ZERO : null);
@@ -330,7 +361,8 @@ class OrderTransactions {
         rows.forEach(row -> args.add(row.id()));
         args.add(sellerId);
         jdbc.query("""
-                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id
+                SELECT order_id, product_id, seller_id, sku, product_name, unit_price, quantity, line_total,
+                       reservation_id, discount_amount
                 FROM order_item
                 WHERE order_id IN (%s) AND seller_id = ?
                 ORDER BY order_id, product_id
@@ -371,7 +403,26 @@ class OrderTransactions {
                 rs.getBigDecimal("unit_price"),
                 rs.getInt("quantity"),
                 rs.getBigDecimal("line_total"),
-                rs.getObject("reservation_id", UUID.class));
+                rs.getObject("reservation_id", UUID.class),
+                rs.getBigDecimal("discount_amount"));
+    }
+
+    private Map<UUID, Discount> discounts(List<UUID> orderIds) {
+        Map<UUID, Discount> result = new HashMap<>();
+        if (orderIds.isEmpty()) {
+            return result;
+        }
+        String marks = String.join(",", java.util.Collections.nCopies(orderIds.size(), "?"));
+        jdbc.query("SELECT id, discount_total, coupon_code FROM customer_order WHERE id IN (" + marks + ")",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> result.put(
+                        rs.getObject("id", UUID.class),
+                        new Discount(rs.getBigDecimal("discount_total"), rs.getString("coupon_code"))),
+                orderIds.toArray());
+        return result;
+    }
+
+    private record Discount(BigDecimal total, String code) {
+        static final Discount NONE = new Discount(BigDecimal.ZERO.setScale(2), null);
     }
 
     private static SaleFilter saleFilter(String sellerId, String status, String query) {
@@ -441,20 +492,15 @@ class OrderTransactions {
 
     public OrderResponse response(OrderRow row) {
         List<ItemResponse> items = jdbc.query("""
-                SELECT product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id
+                SELECT product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id,
+                       discount_amount
                 FROM order_item
                 WHERE order_id = ?
                 ORDER BY product_id
-                """, (rs, n) -> new ItemResponse(
-                        rs.getObject("product_id", UUID.class),
-                        rs.getString("seller_id"),
-                        rs.getString("sku"),
-                        rs.getString("product_name"),
-                        rs.getBigDecimal("unit_price"),
-                        rs.getInt("quantity"),
-                        rs.getBigDecimal("line_total"),
-                        rs.getObject("reservation_id", UUID.class)),
-                row.id());
+                """, (rs, n) -> item(rs), row.id());
+        Discount discount = discounts(List.of(row.id())).getOrDefault(row.id(), Discount.NONE);
+        List<FulfillmentView> groups = fulfillments.forOrders(List.of(row.id()), null)
+                .getOrDefault(row.id(), List.of());
         List<HistoryResponse> history = jdbc.query("""
                 SELECT status, created_at
                 FROM order_status_history
@@ -472,7 +518,11 @@ class OrderTransactions {
                 items,
                 history,
                 row.createdAt(),
-                row.updatedAt());
+                row.updatedAt(),
+                discount.total(),
+                discount.code(),
+                Fulfillments.summary(groups),
+                groups);
     }
 
     private OrderRow required(UUID id) {
@@ -522,7 +572,8 @@ class OrderTransactions {
 
     private List<Line> itemsOf(UUID orderId) {
         return jdbc.query("""
-                SELECT product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id, stock_state
+                SELECT product_id, seller_id, sku, product_name, unit_price, quantity, line_total, reservation_id,
+                       stock_state, discount_amount
                 FROM order_item
                 WHERE order_id = ?
                 ORDER BY product_id
@@ -535,7 +586,8 @@ class OrderTransactions {
                         rs.getInt("quantity"),
                         rs.getBigDecimal("line_total"),
                         rs.getObject("reservation_id", UUID.class),
-                        rs.getString("stock_state")),
+                        rs.getString("stock_state"),
+                        rs.getBigDecimal("discount_amount")),
                 orderId);
     }
 
@@ -821,7 +873,21 @@ class OrderTransactions {
         if (type != null) {
             fact(orderId, type, to, now);
         }
+        settle(orderId, to, now);
         return true;
+    }
+
+    /** Marketplace side effects of a final order status, in the same transaction. */
+    private void settle(UUID orderId, String status, Instant now) {
+        switch (status) {
+            case "CONFIRMED" -> {
+                fulfillments.open(orderId, now);
+                ledger.recordSale(orderId, now);
+            }
+            case "CANCELLED", "FAILED", "PAYMENT_FAILED" -> coupons.release(orderId, now);
+            default -> {
+            }
+        }
     }
 
     private void notePayment(UUID orderId, UUID paymentId, String state, Instant now) {
@@ -965,7 +1031,8 @@ class OrderTransactions {
             int quantity,
             BigDecimal lineTotal,
             UUID reservationId,
-            String stockState) {
+            String stockState,
+            BigDecimal discount) {
     }
 
     private record ListedOrder(

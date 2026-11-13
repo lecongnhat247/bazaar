@@ -44,6 +44,22 @@ export type SaleItem = {
   unitPrice: string | number;
   quantity: number;
   lineTotal: string | number;
+  discount: string | number;
+};
+
+export type FulfillmentStatus = "PENDING" | "PACKED" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+
+export type Fulfillment = {
+  id: string;
+  sellerId: string;
+  status: FulfillmentStatus;
+  shipmentReference: string | null;
+  packedAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+  updatedAt: string;
+  history: { from: string | null; to: string; actor: string; note: string | null; at: string }[];
 };
 
 export type SellerSale = {
@@ -52,9 +68,54 @@ export type SellerSale = {
   status: string;
   currency: string;
   sellerTotal: string | number;
+  sellerDiscount: string | number;
   items: SaleItem[];
   history: { status: string; createdAt: string }[];
   createdAt: string;
+  fulfillment: Fulfillment | null;
+};
+
+export type LedgerEntry = {
+  id: string;
+  orderId: string;
+  sellerId: string;
+  account: string;
+  entryType: string;
+  currency: string;
+  amount: string | number;
+  rateBps: number | null;
+  reversesEntryId: string | null;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type Settlement = {
+  id: string;
+  sellerId: string;
+  currency: string;
+  amount: string | number;
+  entryCount: number;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type SellerFinance = {
+  commissionRateBps: number;
+  balances: {
+    currency: string;
+    sales: string | number;
+    discounts: string | number;
+    commission: string | number;
+    reversals: string | number;
+    netPayable: string | number;
+    settled: string | number;
+    outstanding: string | number;
+    eligibleForSettlement: string | number;
+  }[];
+  entries: LedgerEntry[];
+  settlements: Settlement[];
 };
 
 export type SalesPage = {

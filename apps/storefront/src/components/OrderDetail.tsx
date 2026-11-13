@@ -19,6 +19,10 @@ type Order = {
   status: string;
   currency: string;
   total: number | string;
+  discountTotal?: number | string;
+  couponCode?: string | null;
+  fulfillmentStatus?: string;
+  fulfillments?: { sellerId: string; status: string; shipmentReference: string | null }[];
   items: Item[];
   history: { status: string; createdAt: string }[];
 };
@@ -145,7 +149,23 @@ export function OrderDetail({ id }: { id: string }) {
             <span>{money(item.lineTotal, order.currency)}</span>
           </div>
         ))}
+        {order.couponCode && Number(order.discountTotal) > 0 ? (
+          <div className={styles.line}>
+            <span>Coupon {order.couponCode}</span>
+            <span>-{money(order.discountTotal ?? 0, order.currency)}</span>
+          </div>
+        ) : null}
         <p className={styles.muted}>Unit prices were saved from the catalog when the order was created.</p>
+        {order.fulfillments && order.fulfillments.length > 0 ? (
+          <>
+            <p className={styles.muted}>Delivery: {order.fulfillmentStatus}. Each seller ships its own items.</p>
+            <ul className={styles.history}>
+              {order.fulfillments.map((group) => (
+                <li key={group.sellerId}>Seller {group.sellerId.slice(0, 8)}: {group.status}{group.shipmentReference ? ` · ${group.shipmentReference}` : ""}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
         <ol className={styles.history}>
           {order.history.map((entry) => (
             <li key={`${entry.status}-${entry.createdAt}`}>{entry.status}</li>

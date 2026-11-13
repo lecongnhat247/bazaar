@@ -24,6 +24,7 @@ import com.bazaar.order.api.CheckoutItem;
 import com.bazaar.order.checkout.DownstreamClient.CatalogProduct;
 import com.bazaar.order.checkout.OrderTransactions.Line;
 import com.bazaar.order.checkout.OrderTransactions.OrderRow;
+import com.bazaar.order.market.Coupons;
 
 @Service
 public class CheckoutService {
@@ -40,13 +41,16 @@ public class CheckoutService {
         this.clock = clock;
     }
 
-    public CheckoutOutcome checkout(Jwt jwt, String idempotencyKey, List<CheckoutItem> items, String outcome, UUID campaignId) {
+    public CheckoutOutcome checkout(
+            Jwt jwt, String idempotencyKey, List<CheckoutItem> items, String outcome, UUID campaignId,
+            String couponCode) {
         metrics.attempt();
         try {
             OrderAccess access = access(jwt);
             String key = validKey(idempotencyKey);
             List<CheckoutItem> lines = uniqueItems(items);
-            String hash = hash(access.subject(), outcome, campaignId, lines);
+            String coupon = Coupons.normalize(couponCode);
+            String hash = hash(access.subject(), outcome, campaignId, coupon, lines);
             OrderRow existing = transactions.findByKey(key);
             if (existing != null) {
                 CheckoutOutcome replayed = new CheckoutOutcome(replay(access, existing, hash), false);
@@ -64,7 +68,8 @@ public class CheckoutService {
                         total(priced),
                         snapshot(priced),
                         clock.instant(),
-                        campaignId);
+                        campaignId,
+                        coupon);
                 metrics.accepted();
                 return new CheckoutOutcome(transactions.response(created), true);
             } catch (DataIntegrityViolationException conflict) {
@@ -207,7 +212,8 @@ public class CheckoutService {
                     line.item().quantity(),
                     lineTotal,
                     null,
-                    null));
+                    null,
+                    BigDecimal.ZERO.setScale(2)));
         }
         return lines;
     }
@@ -252,14 +258,15 @@ public class CheckoutService {
         return items;
     }
 
-    private static String hash(String customer, String outcome, UUID campaignId, List<CheckoutItem> items) {
+    private static String hash(
+            String customer, String outcome, UUID campaignId, String coupon, List<CheckoutItem> items) {
         String body = items.stream()
                 .sorted(Comparator.comparing(CheckoutItem::productId))
                 .map(item -> item.productId() + ":" + item.quantity())
                 .reduce((left, right) -> left + "," + right)
                 .orElse("");
         String campaign = campaignId == null ? "" : campaignId.toString();
-        return digest(customer + "|" + outcome + "|" + campaign + "|" + body);
+        return digest(customer + "|" + outcome + "|" + campaign + "|" + (coupon == null ? "" : coupon) + "|" + body);
     }
 
     private static String digest(String source) {

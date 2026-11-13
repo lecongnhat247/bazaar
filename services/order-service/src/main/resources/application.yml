@@ -99,6 +99,7 @@ bazaar:
       circuit-minimum: 5
       circuit-failure-rate: 50
       circuit-open: 10s
+    commission-default-bps: ${ORDER_COMMISSION_DEFAULT_BPS:1000}
     events-topic: ${ORDER_EVENTS_TOPIC:bazaar.order.events}
     inventory-events-topic: ${INVENTORY_EVENTS_TOPIC:bazaar.inventory.events}
     payment-events-topic: ${PAYMENT_EVENTS_TOPIC:bazaar.payment.events}

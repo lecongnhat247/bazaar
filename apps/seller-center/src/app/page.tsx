@@ -82,7 +82,7 @@ export default function DashboardPage() {
         <article className={styles.card}><span>Orders still in progress</span><strong>{sales.pendingOrders}</strong></article>
       </section>
       <p className={styles.note}>
-        Low stock means available quantity of {LOW} or less, or no stock row, among the first 50 of your products. Orders still in progress use the checkout status of the whole customer order. Shipment tracking is not part of Seller Center.
+        Low stock means available quantity of {LOW} or less, or no stock row, among the first 50 of your products. Orders still in progress use the checkout status of the whole customer order. Fulfillment is manual: mark your part of an order packed, shipped and delivered from its detail page. There is no real carrier tracking.
       </p>
       <h2>Recent sales</h2>
       {sales.orders.length === 0 ? <p>No sales yet.</p> : (

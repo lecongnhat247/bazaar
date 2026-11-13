@@ -74,9 +74,22 @@ A new hold, a release, a commit, and an expiry each insert one `bazaar.inventory
 
 Phase 1 exposes `GET /actuator/health` and `GET /api/v1/orders/info`. Both stay public.
 
-Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYMENT` order, and asks payment to simulate success or failure. Success confirms the order and commits the reservation. Failure marks `PAYMENT_FAILED` and releases the reservation. A customer can cancel only while payment is still pending. The service calls the other three over HTTP and does not read their databases. There is no shipping status in this milestone.
+Phase 2 checkout reads the catalog price, reserves stock, stores a `PENDING_PAYMENT` order, and asks payment to simulate success or failure. Success confirms the order and commits the reservation. Failure marks `PAYMENT_FAILED` and releases the reservation. A customer can cancel only while payment is still pending. The service calls the other three over HTTP and does not read their databases. Shipping status arrived in Phase 5 M4 (manual, per seller).
 
 Checkout returns as soon as the order is stored in `PENDING_INVENTORY`. The order service then sends `inventory.reservation-requested` and, after stock is held, `payment.requested`. Payment success asks inventory to commit. Payment failure, a failed reservation, or a customer cancel releases the hold. If commit keeps failing after a successful payment, the saga asks payment to refund and does not leave that payment as succeeded. A scheduler resends the current command when a step is stuck, and gives up when the step is still stuck after the timeout. Readiness does not include the broker.
+
+Phase 5 M4 adds marketplace workflows to this service. Routes (all under `/api/v1/orders`, SELLER acts on its own data only, ADMIN writes, OPERATOR reads):
+
+| Route | Who | Purpose |
+| --- | --- | --- |
+| `POST /checkout` with optional `couponCode` | CUSTOMER | The server prices the coupon. |
+| `PATCH /{id}/fulfillment` | SELLER | Pack, ship (needs `shipmentReference`), deliver, or cancel own group. |
+| `GET /coupons`, `POST /coupons`, `PATCH /coupons/{code}` | read: staff; write: ADMIN | Coupon management. |
+| `GET /finance/me` | SELLER | Own balances, entries, settlements. |
+| `GET /finance/ledger`, `/finance/reconciliation`, `/finance/commission-rates`, `/finance/settlements` | staff | Audit reads. |
+| `POST /finance/commission-rates`, `/finance/settlements` (with `Idempotency-Key`), `/finance/refunds` | ADMIN | Commission, mock settlement, refund adjustment. |
+
+Each order line keeps its seller. A multi-seller order has one fulfillment group per seller. The ledger is append-only and a correction is a reversal entry. Settlement and refund adjustment are mock accounting; no payout provider is called and the customer payment is not refunded. See [ADR-009](../adr/ADR-009-marketplace-ledger-coupons-fulfillment.md).
 
 ## Payment Service
 

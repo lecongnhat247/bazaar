@@ -18,6 +18,7 @@ const LINKS = [
   ["/products", "Products"],
   ["/inventory", "Inventory"],
   ["/orders", "Orders"],
+  ["/earnings", "Earnings"],
   ["/promotions", "Promotions"],
 ];
 

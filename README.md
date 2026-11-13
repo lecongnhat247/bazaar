@@ -62,6 +62,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M1 | Seller domain foundation | Complete |
 | M2 | Seller Center | Complete |
 | M3 | Admin Portal | Complete |
+| M4 | Marketplace business workflows | Complete |
 
 ## Documentation
 
@@ -92,6 +93,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [ADR-006 Catalog on PostgreSQL](docs/adr/ADR-006-catalog-postgresql.md)
 - [ADR-007 Kafka in KRaft](docs/adr/ADR-007-kafka-kraft.md)
 - [ADR-008 Seller profile in identity](docs/adr/ADR-008-seller-profile-in-identity.md)
+- [ADR-009 Marketplace ledger, coupons, fulfillment](docs/adr/ADR-009-marketplace-ledger-coupons-fulfillment.md)
 
 ## Planned applications
 

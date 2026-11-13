@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
@@ -44,6 +46,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -886,6 +889,750 @@ class OrderApplicationTests {
                 .andExpect(jsonPath("$.page").value(0));
     }
 
+    // ------------------------------------------------------------------
+    // Phase 5 M4: marketplace workflows (fulfillment, coupons, commission, ledger, settlement)
+    // ------------------------------------------------------------------
+
+    @Test
+    void multiSellerOrderKeepsEachLinesSellerAndEachSellerSeesOnlyTheirOwn() throws Exception {
+        String id = confirmed("buyer-multi", "multi-key-0001", null, LAMP, SHIRT);
+
+        assertThat(jdbc.queryForList(
+                "SELECT seller_id FROM order_item WHERE order_id = ?::uuid ORDER BY seller_id", String.class, id))
+                .containsExactly("seller-1", "seller-2");
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-multi")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.total").value(44.50))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.fulfillments.length()").value(2))
+                .andExpect(jsonPath("$.fulfillments[0].sellerId").value("seller-1"))
+                .andExpect(jsonPath("$.fulfillments[1].sellerId").value("seller-2"))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("PENDING"));
+
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", id).with(seller("seller-1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(1))
+                .andExpect(jsonPath("$.orders[0].items.length()").value(1))
+                .andExpect(jsonPath("$.orders[0].items[0].sku").value("LAMP"))
+                .andExpect(jsonPath("$.orders[0].items[0].sellerId").value("seller-1"))
+                .andExpect(jsonPath("$.orders[0].sellerTotal").value(25.00))
+                .andExpect(jsonPath("$.orders[0].fulfillment.sellerId").value("seller-1"));
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", id).with(seller("seller-2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(1))
+                .andExpect(jsonPath("$.orders[0].items.length()").value(1))
+                .andExpect(jsonPath("$.orders[0].items[0].sku").value("SHIRT"))
+                .andExpect(jsonPath("$.orders[0].sellerTotal").value(19.50))
+                .andExpect(jsonPath("$.orders[0].fulfillment.sellerId").value("seller-2"))
+                .andExpect(jsonPath("$.orders[0].couponCode").doesNotExist());
+    }
+
+    @Test
+    void sellersCannotReadOrChangeAnotherSellersData() throws Exception {
+        String id = confirmed("buyer-iso", "iso-key-00001", null, LAMP); // seller-1 only
+
+        assertThat(fulfil("seller-2", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(404);
+        assertThat(fulfil("buyer-iso", id, "PACKED", null, null, customer("buyer-iso")).getResponse().getStatus())
+                .isEqualTo(403);
+        assertThat(fulfil("admin-iso", id, "PACKED", null, null, admin("admin-iso")).getResponse().getStatus())
+                .isEqualTo(403);
+        assertThat(fulfil("operator-iso", id, "PACKED", null, null, operator("operator-iso")).getResponse()
+                .getStatus()).isEqualTo(403);
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM fulfillment WHERE order_id = ?::uuid AND seller_id = 'seller-1'",
+                String.class, id)).isEqualTo("PENDING");
+
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", id).with(seller("seller-2")))
+                .andExpect(jsonPath("$.totalOrders").value(0));
+        String other = mockMvc.perform(get("/api/v1/orders/finance/me").with(seller("seller-2")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(other, "$.entries[?(@.sellerId != 'seller-2')]"))
+                .isEmpty();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(other, "$.entries[?(@.account == 'PLATFORM_REVENUE')]"))
+                .isEmpty();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(other, "$.entries[?(@.orderId == '" + id + "')]"))
+                .isEmpty();
+        String own = mockMvc.perform(get("/api/v1/orders/finance/me").with(seller("seller-1")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(own, "$.entries[?(@.orderId == '" + id + "')]"))
+                .isNotEmpty();
+
+        mockMvc.perform(get("/api/v1/orders/finance/me").with(customer("buyer-iso"))).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/finance/me").with(admin("admin-iso"))).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/finance/ledger").with(seller("seller-1")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/finance/reconciliation").with(seller("seller-1")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/coupons").with(seller("seller-1"))).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/orders/coupons").with(customer("buyer-iso"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void sellersFulfilTheirOwnGroupIndependentlyAndTheOrderIsPartiallyShipped() throws Exception {
+        String id = confirmed("buyer-partial", "partial-key-01", null, LAMP, SHIRT);
+
+        assertThat(fulfil("seller-1", id, "SHIPPED", "TRACK-AAA1", null).getResponse().getStatus()).isEqualTo(409);
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-1", id, "SHIPPED", null, null).getResponse().getStatus()).isEqualTo(400);
+        assertThat(fulfil("seller-1", id, "SHIPPED", "bad ref!", null).getResponse().getStatus()).isEqualTo(400);
+        MvcResult shipped = fulfil("seller-1", id, "SHIPPED", "TRACK-AAA1", null);
+        assertThat(shipped.getResponse().getStatus()).isEqualTo(200);
+        String shippedJson = shipped.getResponse().getContentAsString();
+        assertThat((String) com.jayway.jsonpath.JsonPath.read(shippedJson, "$.shipmentReference"))
+                .isEqualTo("TRACK-AAA1");
+        assertThat((Object) com.jayway.jsonpath.JsonPath.read(shippedJson, "$.shippedAt")).isNotNull();
+        // the repeated PACKED request was idempotent: PENDING, PACKED, SHIPPED
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(shippedJson, "$.history")).hasSize(3);
+
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-partial")))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("PARTIALLY_SHIPPED"))
+                .andExpect(jsonPath("$.fulfillments[0].status").value("SHIPPED"))
+                .andExpect(jsonPath("$.fulfillments[1].status").value("PENDING"));
+        mockMvc.perform(get("/api/v1/orders/sales").param("q", id).with(seller("seller-2")))
+                .andExpect(jsonPath("$.orders[0].fulfillment.status").value("PENDING"));
+
+        assertThat(fulfil("seller-2", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-2", id, "SHIPPED", "TRACK-BBB2", null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-1", id, "DELIVERED", null, null).getResponse().getStatus()).isEqualTo(200);
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-partial")))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("SHIPPED"));
+        assertThat(fulfil("seller-2", id, "DELIVERED", null, null).getResponse().getStatus()).isEqualTo(200);
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-partial")))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("DELIVERED"));
+        // a delivered group cannot move backwards
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(409);
+    }
+
+    @Test
+    void ordersCanBeCancelledOnlyBeforeConfirmationAndSellersCancelOnlyBeforeShipping() throws Exception {
+        String pending = place("buyer-cancel", "cancel-key-001", null, LAMP);
+        mockMvc.perform(post("/api/v1/orders/" + pending + "/cancel").with(customer("buyer-cancel")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        mockMvc.perform(post("/api/v1/orders/" + pending + "/cancel").with(customer("buyer-cancel")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM fulfillment WHERE order_id = ?::uuid", Integer.class,
+                pending)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ledger_entry WHERE order_id = ?::uuid", Integer.class,
+                pending)).isZero();
+
+        String id = confirmed("buyer-cancel", "cancel-key-002", null, LAMP, SHIRT);
+        mockMvc.perform(post("/api/v1/orders/" + id + "/cancel").with(customer("buyer-cancel")))
+                .andExpect(status().isConflict());
+
+        assertThat(fulfil("seller-1", id, "CANCELLED", null, null).getResponse().getStatus()).isEqualTo(400);
+        assertThat(fulfil("seller-1", id, "CANCELLED", null, "Out of stock at the warehouse").getResponse()
+                .getStatus()).isEqualTo(200);
+        List<Map<String, Object>> entries = ledgerOf(id);
+        assertThat(net(entries, "seller-1")).isEqualByComparingTo("0.00");
+        assertThat(net(entries, "seller-2")).isEqualByComparingTo("19.50");
+        assertThat(entries.stream().filter(entry -> "REVERSAL".equals(entry.get("entryType"))).count()).isEqualTo(3);
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-cancel")))
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.fulfillments[0].status").value("CANCELLED"))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("PENDING"));
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(409);
+
+        assertThat(fulfil("seller-2", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-2", id, "SHIPPED", "TRACK-CCC3", null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-2", id, "CANCELLED", null, "Changed my mind").getResponse().getStatus())
+                .isEqualTo(409);
+        assertThat(net(ledgerOf(id), "seller-2")).isEqualByComparingTo("19.50");
+        assertThat(fulfil("seller-2", id, "DELIVERED", null, null).getResponse().getStatus()).isEqualTo(200);
+        mockMvc.perform(get("/api/v1/orders/" + id).with(customer("buyer-cancel")))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("DELIVERED"));
+    }
+
+    @Test
+    void ordersConfirmedBeforeFulfillmentExistedGetTheirGroupOnFirstSellerAction() throws Exception {
+        String id = confirmed("buyer-backfill", "backfill-key-1", null, LAMP);
+        jdbc.update("DELETE FROM fulfillment_event WHERE fulfillment_id IN "
+                + "(SELECT id FROM fulfillment WHERE order_id = ?::uuid)", id);
+        jdbc.update("DELETE FROM fulfillment WHERE order_id = ?::uuid", id);
+
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM fulfillment WHERE order_id = ?::uuid", Integer.class,
+                id)).isEqualTo(1);
+        // the sale entries already existed, so the backfill must not duplicate them
+        assertThat(ledgerOf(id)).hasSize(3);
+        assertThat(fulfil("seller-2", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void couponEligibilityIsDecidedByTheServer() throws Exception {
+        for (RequestPostProcessor who : List.of(customer("buyer-elig"), seller("seller-1"), operator("op-elig"))) {
+            mockMvc.perform(post("/api/v1/orders/coupons").with(who).contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(couponBody("NOPE-CODE", Map.of()))))
+                    .andExpect(status().isForbidden());
+        }
+        mockMvc.perform(get("/api/v1/orders/coupons").with(operator("op-elig"))).andExpect(status().isOk());
+
+        // invalid shapes
+        assertThat(createCouponStatus("BAD-PERCENT", mapOf("discountType", "PERCENT"))).isEqualTo(400);
+        assertThat(createCouponStatus("BAD-FIXED", mapOf("percent", 10))).isEqualTo(400);
+        assertThat(createCouponStatus("BAD-WINDOW", mapOf("endsAt", Instant.now().minusSeconds(7200).toString())))
+                .isEqualTo(400);
+        assertThat(createCouponStatus("BAD-SELLER", mapOf("fundedBy", "SELLER"))).isEqualTo(400);
+
+        createCoupon("ELIG-SELLER2", mapOf("discountType", "PERCENT", "percent", 10, "fixedAmount", null,
+                "sellerId", "seller-2"));
+        assertThat(createCouponStatus("ELIG-SELLER2", Map.of())).isEqualTo(409);
+
+        assertConflict(attempt("buyer-elig", "elig-key-0001", "ELIG-SELLER2", LAMP), "does not apply");
+        mockMvc.perform(get("/api/v1/orders").with(customer("buyer-elig")))
+                .andExpect(jsonPath("$.length()").value(0));
+
+        // lower-case code accepted; amounts sent by the browser are ignored
+        MvcResult created = mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-elig"))
+                        .header("Idempotency-Key", "elig-key-0002")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":\"" + LAMP + "\",\"quantity\":1},{\"productId\":\"" + SHIRT
+                                + "\",\"quantity\":1}],\"outcome\":\"SUCCESS\",\"couponCode\":\"elig-seller2\","
+                                + "\"discount\":99,\"discountTotal\":99,\"total\":0.01}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.total").value(42.55))
+                .andExpect(jsonPath("$.discountTotal").value(1.95))
+                .andExpect(jsonPath("$.couponCode").value("ELIG-SELLER2"))
+                .andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        assertThat(jdbc.queryForObject(
+                "SELECT discount_amount FROM order_item WHERE order_id = ?::uuid AND sku = 'SHIRT'",
+                BigDecimal.class, id)).isEqualByComparingTo("1.95");
+        assertThat(jdbc.queryForObject(
+                "SELECT discount_amount FROM order_item WHERE order_id = ?::uuid AND sku = 'LAMP'",
+                BigDecimal.class, id)).isEqualByComparingTo("0.00");
+
+        Instant now = Instant.now();
+        createCoupon("ELIG-EXPIRED", mapOf("startsAt", now.minusSeconds(172800).toString(),
+                "endsAt", now.minusSeconds(86400).toString()));
+        assertConflict(attempt("buyer-elig2", "elig-key-0003", "ELIG-EXPIRED", LAMP), "expired");
+        createCoupon("ELIG-FUTURE", mapOf("startsAt", now.plusSeconds(86400).toString(),
+                "endsAt", now.plusSeconds(172800).toString()));
+        assertConflict(attempt("buyer-elig2", "elig-key-0004", "ELIG-FUTURE", LAMP), "not active");
+        createCoupon("ELIG-MIN", mapOf("minSubtotal", 100.00));
+        assertConflict(attempt("buyer-elig2", "elig-key-0005", "ELIG-MIN", LAMP), "minimum");
+        assertConflict(attempt("buyer-elig2", "elig-key-0006", "NO-SUCH-COUPON", LAMP), "not valid");
+        assertConflict(attempt("buyer-elig2", "elig-key-0007", "bad code!", LAMP), "not valid");
+
+        createCoupon("ELIG-CAMPAIGN", Map.of());
+        UUID campaignId = UUID.fromString("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d2001");
+        assertConflict(mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer("buyer-elig2"))
+                        .header("Idempotency-Key", "elig-key-0008")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":\"" + LAMP
+                                + "\",\"quantity\":1}],\"outcome\":\"SUCCESS\",\"campaignId\":\"" + campaignId
+                                + "\",\"couponCode\":\"ELIG-CAMPAIGN\"}"))
+                .andReturn(), "campaign");
+
+        createCoupon("ELIG-OFF", Map.of());
+        mockMvc.perform(patch("/api/v1/orders/coupons/ELIG-OFF").with(operator("op-elig"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"DISABLED\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(patch("/api/v1/orders/coupons/ELIG-OFF").with(admin("admin-coupon"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"DISABLED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.terms.status").value("DISABLED"));
+        assertConflict(attempt("buyer-elig2", "elig-key-0009", "ELIG-OFF", LAMP), "not valid");
+        mockMvc.perform(get("/api/v1/orders").with(customer("buyer-elig2")))
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void couponUsageLimitsCountLiveOrdersOnlyAndSurviveReplays() throws Exception {
+        createCoupon("LIMIT-ONE", Map.of("usageLimit", 1, "perCustomerLimit", 1));
+        createCoupon("LIMIT-PER", Map.of("perCustomerLimit", 2));
+
+        String first = place("buyer-lim-a", "lim-key-000001", "LIMIT-ONE", LAMP);
+        assertThat(couponUsed("LIMIT-ONE")).isEqualTo(1);
+        // replaying the same request does not use the coupon twice
+        mockMvc.perform(post("/api/v1/orders/checkout").with(customer("buyer-lim-a"))
+                        .header("Idempotency-Key", "lim-key-000001").contentType(MediaType.APPLICATION_JSON)
+                        .content(cartJson("LIMIT-ONE", LAMP)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(first))
+                .andExpect(jsonPath("$.total").value(20.00));
+        assertThat(couponUsed("LIMIT-ONE")).isEqualTo(1);
+        // the same key with another coupon is a different request
+        assertThat(attempt("buyer-lim-a", "lim-key-000001", "LIMIT-PER", LAMP).getResponse().getStatus())
+                .isEqualTo(409);
+
+        assertConflict(attempt("buyer-lim-b", "lim-key-000002", "LIMIT-ONE", LAMP), "usage limit");
+
+        // per-customer limit
+        place("buyer-lim-a", "lim-key-000003", "LIMIT-PER", LAMP);
+        place("buyer-lim-a", "lim-key-000004", "LIMIT-PER", LAMP);
+        assertConflict(attempt("buyer-lim-a", "lim-key-000005", "LIMIT-PER", LAMP), "already used");
+        place("buyer-lim-b", "lim-key-000006", "LIMIT-PER", LAMP);
+
+        // cancelling a not-yet-confirmed order frees the usage
+        mockMvc.perform(post("/api/v1/orders/" + first + "/cancel").with(customer("buyer-lim-a")))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        assertThat(couponUsed("LIMIT-ONE")).isZero();
+        String second = place("buyer-lim-b", "lim-key-000007", "LIMIT-ONE", LAMP);
+        assertThat(couponUsed("LIMIT-ONE")).isEqualTo(1);
+
+        // an order that fails (no stock) frees it too
+        saga.accept(failedReservation(second));
+        mockMvc.perform(get("/api/v1/orders/" + second).with(customer("buyer-lim-b")))
+                .andExpect(jsonPath("$.status").value("FAILED"));
+        assertThat(couponUsed("LIMIT-ONE")).isZero();
+
+        // a confirmed order keeps its usage
+        String confirmed = place("buyer-lim-c", "lim-key-000008", "LIMIT-ONE", LAMP);
+        confirm(confirmed, LAMP);
+        assertThat(couponUsed("LIMIT-ONE")).isEqualTo(1);
+        assertConflict(attempt("buyer-lim-d", "lim-key-000009", "LIMIT-ONE", LAMP), "usage limit");
+    }
+
+    @Test
+    void couponUsageLimitHoldsUnderConcurrentCheckouts() throws Exception {
+        createCoupon("RACE-ONE", Map.of("usageLimit", 1));
+        int threads = 5;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<java.util.concurrent.Future<Integer>> results = new java.util.ArrayList<>();
+        for (int index = 0; index < threads; index++) {
+            int number = index;
+            results.add(pool.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return attempt("buyer-race-" + number, "race-key-0000" + number, "RACE-ONE", LAMP)
+                        .getResponse().getStatus();
+            }));
+        }
+        start.countDown();
+        int created = 0;
+        int conflicts = 0;
+        for (java.util.concurrent.Future<Integer> result : results) {
+            int code = result.get(30, TimeUnit.SECONDS);
+            if (code == 201) {
+                created++;
+            } else if (code == 409) {
+                conflicts++;
+            }
+        }
+        pool.shutdown();
+        assertThat(created).isEqualTo(1);
+        assertThat(conflicts).isEqualTo(threads - 1);
+        assertThat(couponUsed("RACE-ONE")).isEqualTo(1);
+    }
+
+    @Test
+    void commissionIsCalculatedPerSellerAndHistoryIsNeverRewritten() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/finance/commission-rates").with(seller("seller-2"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"sellerId\":\"seller-2\",\"rateBps\":1500}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/orders/finance/commission-rates").with(operator("op-comm"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"sellerId\":\"seller-2\",\"rateBps\":1500}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/orders/finance/commission-rates").with(admin("admin-comm"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"sellerId\":\"seller-2\",\"rateBps\":4000}"))
+                .andExpect(status().isBadRequest());
+        setRate("seller-2", 1500);
+
+        String id = confirmed("buyer-comm", "comm-key-00001", null, LAMP, SHIRT);
+        List<Map<String, Object>> entries = ledgerOf(id);
+        assertThat(entries).hasSize(6);
+        assertThat(amount(entries, "seller-1", "SELLER_PAYABLE", "SALE")).isEqualByComparingTo("25.00");
+        assertThat(amount(entries, "seller-1", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-2.50");
+        assertThat(amount(entries, "seller-1", "PLATFORM_REVENUE", "COMMISSION")).isEqualByComparingTo("2.50");
+        assertThat(amount(entries, "seller-2", "SELLER_PAYABLE", "SALE")).isEqualByComparingTo("19.50");
+        // 19.50 * 15% = 2.925 -> 2.93 (HALF_UP)
+        assertThat(amount(entries, "seller-2", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-2.93");
+        assertThat(amount(entries, "seller-2", "PLATFORM_REVENUE", "COMMISSION")).isEqualByComparingTo("2.93");
+        assertThat(jdbc.queryForObject("""
+                SELECT DISTINCT rate_bps FROM ledger_entry
+                WHERE order_id = ?::uuid AND seller_id = 'seller-2' AND entry_type = 'COMMISSION'
+                """, Integer.class, id)).isEqualTo(1500);
+
+        // a later rate change only affects new orders
+        setRate("seller-2", 2000);
+        assertThat(ledgerOf(id)).isEqualTo(entries);
+        String later = confirmed("buyer-comm", "comm-key-00002", null, SHIRT);
+        assertThat(amount(ledgerOf(later), "seller-2", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-3.90");
+        mockMvc.perform(get("/api/v1/orders/finance/commission-rates").with(operator("op-comm")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.defaultRateBps").value(1000))
+                .andExpect(jsonPath("$.rates.length()").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)));
+
+        // platform-funded coupon: commission stays on the gross, the platform carries the discount
+        createCoupon("COMM-PLATFORM", Map.of("fixedAmount", 5.00));
+        String platform = confirmed("buyer-comm", "comm-key-00003", "COMM-PLATFORM", LAMP, SHIRT);
+        List<Map<String, Object>> platformEntries = ledgerOf(platform);
+        assertThat(amount(platformEntries, "seller-1", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-2.50");
+        assertThat(amount(platformEntries, "seller-2", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-3.90");
+        assertThat(amount(platformEntries, "seller-1", "PLATFORM_REVENUE", "PLATFORM_DISCOUNT"))
+                .isEqualByComparingTo("-2.81");
+        assertThat(amount(platformEntries, "seller-2", "PLATFORM_REVENUE", "PLATFORM_DISCOUNT"))
+                .isEqualByComparingTo("-2.19");
+        assertThat(net(platformEntries, "seller-1")).isEqualByComparingTo("22.19");
+        assertThat(net(platformEntries, "seller-2")).isEqualByComparingTo("17.31");
+
+        // seller-funded coupon: the seller carries the discount, commission is on the net
+        createCoupon("COMM-SELLER", mapOf("discountType", "PERCENT", "percent", 10, "fixedAmount", null,
+                "sellerId", "seller-2"));
+        String funded = confirmed("buyer-comm", "comm-key-00004", "COMM-SELLER", LAMP, SHIRT);
+        List<Map<String, Object>> fundedEntries = ledgerOf(funded);
+        assertThat(amount(fundedEntries, "seller-2", "SELLER_PAYABLE", "DISCOUNT")).isEqualByComparingTo("-1.95");
+        assertThat(amount(fundedEntries, "seller-2", "SELLER_PAYABLE", "COMMISSION")).isEqualByComparingTo("-3.51");
+        assertThat(net(fundedEntries, "seller-2")).isEqualByComparingTo("17.55");
+        assertThat(net(fundedEntries, "seller-1")).isEqualByComparingTo("25.00");
+        assertThat(reconciliation().balanced()).isTrue();
+    }
+
+    @Test
+    void refundsAreReversalEntriesAndTheLedgerIsAppendOnly() throws Exception {
+        String id = confirmed("buyer-refund", "refund-key-0001", null, LAMP);
+        String pending = confirmed("buyer-refund", "refund-key-0002", null, LAMP);
+
+        String body = "{\"orderId\":\"" + id + "\",\"sellerId\":\"seller-1\",\"reason\":\"Customer returned the lamp\"}";
+        // not shipped yet: nothing to refund, sellers cancel instead
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-refund"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-1", id, "SHIPPED", "TRACK-RRR1", null).getResponse().getStatus()).isEqualTo(200);
+
+        for (RequestPostProcessor who : List.of(operator("op-refund"), seller("seller-1"), customer("buyer-refund"))) {
+            mockMvc.perform(post("/api/v1/orders/finance/refunds").with(who)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isForbidden());
+        }
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-refund"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"" + id + "\",\"sellerId\":\"seller-1\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-refund"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reversedEntries").value(3))
+                .andExpect(jsonPath("$.alreadyRefunded").value(false));
+        // replay: nothing new is written
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-refund"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reversedEntries").value(0))
+                .andExpect(jsonPath("$.alreadyRefunded").value(true));
+
+        List<Map<String, Object>> entries = ledgerOf(id);
+        assertThat(entries).hasSize(6);
+        assertThat(net(entries, "seller-1")).isEqualByComparingTo("0.00");
+        assertThat(entries.stream().filter(entry -> entry.get("reversesEntryId") != null).count()).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ledger_entry WHERE order_id = ?::uuid", Integer.class,
+                pending)).isEqualTo(3);
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-refund"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"" + UUID.randomUUID()
+                                + "\",\"sellerId\":\"seller-1\",\"reason\":\"No such group\"}"))
+                .andExpect(status().isNotFound());
+
+        // the ledger can never be edited or deleted, not even by the application's own role
+        assertThatThrownBy(() -> jdbc.update("UPDATE ledger_entry SET amount = amount + 1 WHERE order_id = ?::uuid", id))
+                .hasMessageContaining("append-only");
+        assertThatThrownBy(() -> jdbc.update("DELETE FROM ledger_entry WHERE order_id = ?::uuid", id))
+                .hasMessageContaining("append-only");
+        assertThat(reconciliation().balanced()).isTrue();
+    }
+
+    @Test
+    void settlementIsIdempotentAndCarriesRefundAdjustmentsForward() throws Exception {
+        String id = confirmed("buyer-settle", "settle-key-0001", null, LAMP);
+        assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fulfil("seller-1", id, "SHIPPED", "TRACK-SSS1", null).getResponse().getStatus()).isEqualTo(200);
+        BigDecimal eligibleWhileShipped = mine("seller-1", "eligibleForSettlement");
+        assertThat(fulfil("seller-1", id, "DELIVERED", null, null).getResponse().getStatus()).isEqualTo(200);
+        BigDecimal eligible = mine("seller-1", "eligibleForSettlement");
+        // a delivered group becomes payable: 25.00 - 10% commission
+        assertThat(eligible.subtract(eligibleWhileShipped)).isEqualByComparingTo("22.50");
+        BigDecimal settledBefore = mine("seller-1", "settled");
+
+        assertThat(settle(null, "seller-1", admin("admin-settle")).getResponse().getStatus()).isEqualTo(400);
+        assertThat(settle("settle-run-0001", "seller-1", operator("op-settle")).getResponse().getStatus())
+                .isEqualTo(403);
+        assertThat(settle("settle-run-0001", "seller-1", seller("seller-1")).getResponse().getStatus())
+                .isEqualTo(403);
+
+        MvcResult first = settle("settle-run-0001", "seller-1", admin("admin-settle"));
+        assertThat(first.getResponse().getStatus()).isEqualTo(200);
+        String firstJson = first.getResponse().getContentAsString();
+        assertThat((Boolean) com.jayway.jsonpath.JsonPath.read(firstJson, "$.replayed")).isFalse();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(firstJson, "$.settlements")).hasSize(1);
+        assertThat(dec(com.jayway.jsonpath.JsonPath.read(firstJson, "$.settlements[0].amount")))
+                .isEqualByComparingTo(eligible);
+        String settlementId = com.jayway.jsonpath.JsonPath.read(firstJson, "$.settlements[0].id");
+
+        // same key again: the original result, nothing new
+        String replayJson = settle("settle-run-0001", "seller-1", admin("admin-settle")).getResponse()
+                .getContentAsString();
+        assertThat((Boolean) com.jayway.jsonpath.JsonPath.read(replayJson, "$.replayed")).isTrue();
+        assertThat((String) com.jayway.jsonpath.JsonPath.read(replayJson, "$.settlements[0].id"))
+                .isEqualTo(settlementId);
+        // a new key finds nothing left to settle
+        String otherJson = settle("settle-run-0002", "seller-1", admin("admin-settle")).getResponse()
+                .getContentAsString();
+        assertThat((Boolean) com.jayway.jsonpath.JsonPath.read(otherJson, "$.replayed")).isFalse();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(otherJson, "$.settlements")).isEmpty();
+
+        assertThat(mine("seller-1", "settled")).isEqualByComparingTo(settledBefore.add(eligible));
+        assertThat(mine("seller-1", "eligibleForSettlement")).isEqualByComparingTo("0.00");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM (SELECT ledger_entry_id FROM settlement_entry
+                                      GROUP BY ledger_entry_id HAVING COUNT(*) > 1) duplicated
+                """, Integer.class)).isZero();
+
+        // refund after settlement: a negative adjustment that is carried forward, not a payout
+        BigDecimal outstanding = mine("seller-1", "outstanding");
+        mockMvc.perform(post("/api/v1/orders/finance/refunds").with(admin("admin-settle"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"" + id + "\",\"sellerId\":\"seller-1\",\"reason\":\"Refund after payout\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reversedEntries").value(3));
+        assertThat(mine("seller-1", "outstanding")).isEqualByComparingTo(outstanding.subtract(new BigDecimal("22.50")));
+        String carryJson = settle("settle-run-0003", "seller-1", admin("admin-settle")).getResponse()
+                .getContentAsString();
+        assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(carryJson, "$.settlements")).isEmpty();
+        mockMvc.perform(get("/api/v1/orders/finance/settlements").with(operator("op-settle")))
+                .andExpect(status().isOk());
+        assertThat(reconciliation().balanced()).isTrue();
+    }
+
+    @Test
+    void concurrentSettlementRunsWithOneKeyCreateOneSettlement() throws Exception {
+        // two delivered orders (+45.00) outweigh any carried-forward refund adjustment (-22.50)
+        for (String key : List.of("settle-key-0002", "settle-key-0003")) {
+            String id = confirmed("buyer-settle2", key, null, LAMP);
+            assertThat(fulfil("seller-1", id, "PACKED", null, null).getResponse().getStatus()).isEqualTo(200);
+            assertThat(fulfil("seller-1", id, "SHIPPED", "TRACK-SSS2", null).getResponse().getStatus()).isEqualTo(200);
+            assertThat(fulfil("seller-1", id, "DELIVERED", null, null).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        int threads = 4;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<java.util.concurrent.Future<String>> results = new java.util.ArrayList<>();
+        for (int index = 0; index < threads; index++) {
+            results.add(pool.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return settle("settle-run-race1", "seller-1", admin("admin-settle")).getResponse()
+                        .getContentAsString();
+            }));
+        }
+        start.countDown();
+        int original = 0;
+        for (java.util.concurrent.Future<String> result : results) {
+            String json = result.get(30, TimeUnit.SECONDS);
+            if (!(Boolean) com.jayway.jsonpath.JsonPath.read(json, "$.replayed")) {
+                original++;
+            }
+        }
+        pool.shutdown();
+        assertThat(original).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM settlement WHERE starts_with(run_key, 'settle-run-race1:')",
+                Integer.class)).isEqualTo(1);
+        assertThat(reconciliation().balanced()).isTrue();
+    }
+
+    @Test
+    void reconciliationFlagsAGroupThatNoLongerMatchesItsLines() throws Exception {
+        String id = confirmed("buyer-recon", "recon-key-00001", null, LAMP);
+        assertThat(reconciliation().balanced()).isTrue();
+        mockMvc.perform(get("/api/v1/orders/finance/reconciliation").with(customer("buyer-recon")))
+                .andExpect(status().isForbidden());
+
+        jdbc.update("UPDATE order_item SET line_total = line_total + 1 WHERE order_id = ?::uuid", id);
+        try {
+            String json = mockMvc.perform(get("/api/v1/orders/finance/reconciliation").with(operator("op-recon")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.balanced").value(false))
+                    .andReturn().getResponse().getContentAsString();
+            assertThat((List<?>) com.jayway.jsonpath.JsonPath.read(json,
+                    "$.groupMismatches[?(@.orderId == '" + id + "')]")).hasSize(1);
+        } finally {
+            jdbc.update("UPDATE order_item SET line_total = line_total - 1 WHERE order_id = ?::uuid", id);
+        }
+        assertThat(reconciliation().balanced()).isTrue();
+    }
+
+    private String place(String customer, String key, String coupon, UUID... products) throws Exception {
+        MvcResult result = attempt(customer, key, coupon, products);
+        assertThat(result.getResponse().getStatus()).as(result.getResponse().getContentAsString()).isEqualTo(201);
+        return com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.id");
+    }
+
+    private MvcResult attempt(String customer, String key, String coupon, UUID... products) throws Exception {
+        return mockMvc.perform(post("/api/v1/orders/checkout")
+                        .with(customer(customer))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(cartJson(coupon, products)))
+                .andReturn();
+    }
+
+    private static String cartJson(String coupon, UUID... products) {
+        StringBuilder items = new StringBuilder();
+        for (UUID product : products) {
+            if (items.length() > 0) {
+                items.append(',');
+            }
+            items.append("{\"productId\":\"").append(product).append("\",\"quantity\":1}");
+        }
+        return "{\"items\":[" + items + "],\"outcome\":\"SUCCESS\""
+                + (coupon == null ? "" : ",\"couponCode\":\"" + coupon + "\"") + "}";
+    }
+
+    private void confirm(String orderId, UUID... products) throws Exception {
+        List<UUID> reservations = new java.util.ArrayList<>();
+        for (UUID product : products) {
+            UUID reservation = UUID.randomUUID();
+            reservations.add(reservation);
+            saga.accept(reserved(orderId, product, reservation));
+        }
+        saga.accept(payment(orderId, "payment.succeeded"));
+        for (UUID reservation : reservations) {
+            saga.accept(stock(reservation, "inventory.committed"));
+        }
+        assertThat(jdbc.queryForObject("SELECT status FROM customer_order WHERE id = ?::uuid", String.class, orderId))
+                .isEqualTo("CONFIRMED");
+    }
+
+    private String confirmed(String customer, String key, String coupon, UUID... products) throws Exception {
+        String id = place(customer, key, coupon, products);
+        confirm(id, products);
+        return id;
+    }
+
+    private MvcResult fulfil(String sellerSubject, String orderId, String status, String reference, String note)
+            throws Exception {
+        return fulfil(sellerSubject, orderId, status, reference, note, seller(sellerSubject));
+    }
+
+    private MvcResult fulfil(
+            String ignored, String orderId, String status, String reference, String note, RequestPostProcessor who)
+            throws Exception {
+        Map<String, Object> request = new java.util.LinkedHashMap<>();
+        request.put("status", status);
+        if (reference != null) {
+            request.put("shipmentReference", reference);
+        }
+        if (note != null) {
+            request.put("note", note);
+        }
+        return mockMvc.perform(patch("/api/v1/orders/" + orderId + "/fulfillment")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andReturn();
+    }
+
+    private static Map<String, Object> mapOf(Object... pairs) {
+        Map<String, Object> map = new java.util.LinkedHashMap<>();
+        for (int index = 0; index < pairs.length; index += 2) {
+            map.put((String) pairs[index], pairs[index + 1]);
+        }
+        return map;
+    }
+
+    private static Map<String, Object> couponBody(String code, Map<String, Object> overrides) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("code", code);
+        body.put("discountType", "FIXED");
+        body.put("fixedAmount", 5.00);
+        body.put("currency", "USD");
+        body.put("startsAt", Instant.now().minusSeconds(3600).toString());
+        body.put("endsAt", Instant.now().plusSeconds(86400).toString());
+        body.putAll(overrides);
+        return body;
+    }
+
+    private int createCouponStatus(String code, Map<String, Object> overrides) throws Exception {
+        return mockMvc.perform(post("/api/v1/orders/coupons").with(admin("admin-coupon"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(couponBody(code, overrides))))
+                .andReturn().getResponse().getStatus();
+    }
+
+    private void createCoupon(String code, Map<String, Object> overrides) throws Exception {
+        assertThat(createCouponStatus(code, overrides)).as("create coupon " + code).isEqualTo(201);
+    }
+
+    private int couponUsed(String code) throws Exception {
+        String json = mockMvc.perform(get("/api/v1/orders/coupons").with(operator("op-coupons")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        List<Integer> used = com.jayway.jsonpath.JsonPath.read(json, "$[?(@.terms.code == '" + code + "')].used");
+        return used.getFirst();
+    }
+
+    private static void assertConflict(MvcResult result, String fragment) throws Exception {
+        assertThat(result.getResponse().getStatus()).as(result.getResponse().getContentAsString()).isEqualTo(409);
+        assertThat(result.getResponse().getContentAsString()).contains(fragment);
+    }
+
+    private void setRate(String sellerId, int bps) throws Exception {
+        mockMvc.perform(post("/api/v1/orders/finance/commission-rates").with(admin("admin-comm"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sellerId\":\"" + sellerId + "\",\"rateBps\":" + bps + "}"))
+                .andExpect(status().isCreated());
+    }
+
+    private List<Map<String, Object>> ledgerOf(String orderId) throws Exception {
+        String json = mockMvc.perform(get("/api/v1/orders/finance/ledger").param("orderId", orderId)
+                        .param("size", "100").with(operator("op-ledger")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return com.jayway.jsonpath.JsonPath.read(json, "$.items");
+    }
+
+    private static BigDecimal dec(Object value) {
+        return new BigDecimal(String.valueOf(value));
+    }
+
+    private static BigDecimal amount(List<Map<String, Object>> entries, String seller, String account, String type) {
+        return entries.stream()
+                .filter(entry -> seller.equals(entry.get("sellerId")) && account.equals(entry.get("account"))
+                        && type.equals(entry.get("entryType")))
+                .map(entry -> dec(entry.get("amount")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No " + type + " entry on " + account + " for " + seller));
+    }
+
+    /** Sum of every entry of one seller's group: always what the customer paid for that seller's lines. */
+    private static BigDecimal net(List<Map<String, Object>> entries, String seller) {
+        return entries.stream()
+                .filter(entry -> seller.equals(entry.get("sellerId")))
+                .map(entry -> dec(entry.get("amount")))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal mine(String seller, String field) throws Exception {
+        String json = mockMvc.perform(get("/api/v1/orders/finance/me").with(seller(seller)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        List<Object> values = com.jayway.jsonpath.JsonPath.read(json, "$.balances[?(@.currency == 'USD')]." + field);
+        return values.isEmpty() ? BigDecimal.ZERO : dec(values.getFirst());
+    }
+
+    private MvcResult settle(String key, String sellerId, RequestPostProcessor who) throws Exception {
+        MockHttpServletRequestBuilder request = post("/api/v1/orders/finance/settlements")
+                .with(who)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sellerId\":\"" + sellerId + "\"}");
+        if (key != null) {
+            request.header("Idempotency-Key", key);
+        }
+        return mockMvc.perform(request).andReturn();
+    }
+
+    private record Reconciled(boolean balanced) {
+    }
+
+    private Reconciled reconciliation() throws Exception {
+        String json = mockMvc.perform(get("/api/v1/orders/finance/reconciliation").with(operator("op-recon-all")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return new Reconciled(com.jayway.jsonpath.JsonPath.read(json, "$.balanced"));
+    }
+
     private static String body(UUID productId, int quantity, String outcome) {
         return "{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
                 + ",\"price\":1}],\"outcome\":\"" + outcome + "\"}";
@@ -963,7 +1710,8 @@ class OrderApplicationTests {
             String name = SHIRT.equals(id) ? "Shirt" : "Desk lamp";
             String sku = SHIRT.equals(id) ? "SHIRT" : "LAMP";
             String price = SHIRT.equals(id) ? "19.50" : "25.00";
-            send(exchange, 200, "{\"id\":\"" + id + "\",\"sellerId\":\"seller-1\",\"name\":\"" + name
+            String sellerId = SHIRT.equals(id) ? "seller-2" : "seller-1";
+            send(exchange, 200, "{\"id\":\"" + id + "\",\"sellerId\":\"" + sellerId + "\",\"name\":\"" + name
                     + "\",\"sku\":\"" + sku + "\",\"price\":" + price + ",\"currency\":\"USD\",\"status\":\"ACTIVE\"}");
             return;
         }

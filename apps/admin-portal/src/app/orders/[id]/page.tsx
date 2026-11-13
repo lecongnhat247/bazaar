@@ -6,7 +6,8 @@ import { useParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import styles from "../../admin.module.css";
 
-type Item = { name: string; sellerId: string; quantity: number; lineTotal: number };
+type Item = { name: string; sellerId: string; quantity: number; lineTotal: number; discount: number };
+type Group = { sellerId: string; status: string; shipmentReference: string | null };
 type History = { status: string; createdAt: string };
 type Order = {
   id: string;
@@ -17,6 +18,10 @@ type Order = {
   paymentId: string | null;
   items: Item[];
   history: History[];
+  discountTotal: number;
+  couponCode: string | null;
+  fulfillmentStatus: string;
+  fulfillments: Group[];
 };
 type Page = { items: Order[] };
 
@@ -46,12 +51,13 @@ export default function OrderDetailPage() {
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {order ? (
         <>
-          <p>{order.status} · customer {order.customerId} · {order.total} {order.currency}</p>
+          <p>{order.status} · customer {order.customerId} · {order.total} {order.currency}{order.couponCode ? ` · coupon ${order.couponCode} (-${order.discountTotal})` : ""}</p>
+          <p>Fulfillment <span className={styles.badge}>{order.fulfillmentStatus}</span></p>
           {order.paymentId ? <p><Link href={`/payments/${order.paymentId}`}>Payment {order.paymentId}</Link></p> : <p>No payment id yet.</p>}
           <h2>Lines</h2>
           <div className={styles.tableWrap}>
             <table>
-              <thead><tr><th>Product</th><th>Seller</th><th>Qty</th><th>Line</th></tr></thead>
+              <thead><tr><th>Product</th><th>Seller</th><th>Qty</th><th>Line</th><th>Discount</th></tr></thead>
               <tbody>
                 {order.items.map((item) => (
                   <tr key={`${item.sellerId}-${item.name}`}>
@@ -59,11 +65,18 @@ export default function OrderDetailPage() {
                     <td>{item.sellerId}</td>
                     <td>{item.quantity}</td>
                     <td>{item.lineTotal}</td>
+                    <td>{item.discount}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <h2>Fulfillment by seller</h2>
+          {order.fulfillments.length === 0 ? <p>No fulfillment groups yet. They open when the order is CONFIRMED.</p> : (
+            <ul>
+              {order.fulfillments.map((group) => <li key={group.sellerId}>{group.sellerId} · {group.status}{group.shipmentReference ? ` · ${group.shipmentReference}` : ""}</li>)}
+            </ul>
+          )}
           <h2>Lifecycle</h2>
           <ul>
             {order.history.map((step) => <li key={`${step.status}-${step.createdAt}`}>{step.status} · {step.createdAt}</li>)}

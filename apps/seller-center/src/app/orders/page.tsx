@@ -49,7 +49,7 @@ export default function OrdersPage() {
       <p className={styles.kicker}>Orders</p>
       <h1 className={styles.title}>Your items</h1>
       <p className={styles.note}>
-        Each row is a customer order that contains your products. Other sellers&apos; lines are not included. The status is the checkout saga for the whole order. There is no shipment record in this milestone.
+        Each row is a customer order that contains your products. Other sellers&apos; lines are not included. The status is the checkout saga for the whole order. Open an order to pack, ship or deliver your part; fulfillment is manual and there is no shipping provider.
       </p>
       <div className={styles.row}>
         <label>
@@ -70,7 +70,7 @@ export default function OrdersPage() {
         <div className={styles.tableWrap}>
           <table>
             <thead>
-              <tr><th>Order</th><th>Buyer</th><th>Status</th><th>Your items</th><th>Your total</th></tr>
+              <tr><th>Order</th><th>Buyer</th><th>Status</th><th>Your fulfillment</th><th>Your items</th><th>Your total</th></tr>
             </thead>
             <tbody>
               {result.orders.map((order) => (
@@ -78,6 +78,7 @@ export default function OrdersPage() {
                   <td><Link href={`/orders/${order.id}`}>{order.id.slice(0, 8)}</Link></td>
                   <td>{order.customerId}</td>
                   <td>{order.status}</td>
+                  <td>{order.fulfillment?.status ?? "—"}</td>
                   <td>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</td>
                   <td>{money(order.sellerTotal, order.currency)}</td>
                 </tr>

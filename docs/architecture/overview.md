@@ -50,6 +50,8 @@ Phase 5 M2 adds Seller Center at `apps/seller-center` on port 3002. It is a sepa
 
 Phase 5 M3 adds Admin Portal at `apps/admin-portal` on port 3003. ADMIN and OPERATOR can read the staff desk. Only ADMIN changes seller status, account status, categories, product status, or campaign schedule and cancel. OPERATOR cannot. The portal proxies only those staff routes. Account DISABLED is stored in identity and does not by itself block catalog, checkout, or payment. The kind chart does not include this app. The localhost cookie is shared with the shop and Seller Center, so signing in on one replaces the session on the others.
 
+Phase 5 M4 adds marketplace workflows to the order service. An order that holds several sellers' lines gets one fulfillment group per seller when it confirms, and each seller packs, ships, and delivers only its own group by hand. A coupon is a code; the server checks eligibility and calculates the discount, and a usage limit holds under concurrent checkouts. Money is an append-only ledger with a seller commission, reversal entries for cancellations and refunds, a mock settlement that can be replayed safely, and a reconciliation check. Nothing calls a real shipping, payment, or payout provider and no new Kafka topic is used. The decision is [ADR-009](../adr/ADR-009-marketplace-ledger-coupons-fulfillment.md). Seller Center shows fulfillment and earnings, and Admin Portal manages coupons, commission, settlement, and refund adjustments. The kind chart does not include those apps.
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

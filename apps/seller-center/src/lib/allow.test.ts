@@ -9,6 +9,8 @@ test("seller reads and writes stay on the seller routes", () => {
   assert.equal(gatewayPath("POST", ["sellers", "me"]), "/api/v1/sellers/me");
   assert.equal(gatewayPath("PATCH", ["sellers", "me", "store"]), "/api/v1/sellers/me/store");
   assert.equal(gatewayPath("GET", ["orders", "sales"]), "/api/v1/orders/sales");
+  assert.equal(gatewayPath("GET", ["orders", "finance", "me"]), "/api/v1/orders/finance/me");
+  assert.equal(gatewayPath("PATCH", ["orders", PRODUCT, "fulfillment"]), `/api/v1/orders/${PRODUCT}/fulfillment`);
   assert.equal(gatewayPath("GET", ["products", PRODUCT]), `/api/v1/products/${PRODUCT}`);
   assert.equal(gatewayPath("PUT", ["inventory", "products", PRODUCT]), `/api/v1/inventory/products/${PRODUCT}`);
   assert.equal(gatewayPath("POST", ["inventory", "campaigns", PRODUCT, "cancel"]), `/api/v1/inventory/campaigns/${PRODUCT}/cancel`);
@@ -18,6 +20,15 @@ test("another seller, a customer order, and admin moderation are not proxied", (
   assert.equal(gatewayPath("GET", ["orders"]), null);
   assert.equal(gatewayPath("GET", ["orders", PRODUCT]), null);
   assert.equal(gatewayPath("POST", ["orders", "checkout"]), null);
+  assert.equal(gatewayPath("GET", ["orders", "coupons"]), null);
+  assert.equal(gatewayPath("POST", ["orders", "coupons"]), null);
+  assert.equal(gatewayPath("GET", ["orders", "finance", "ledger"]), null);
+  assert.equal(gatewayPath("GET", ["orders", "finance", "reconciliation"]), null);
+  assert.equal(gatewayPath("POST", ["orders", "finance", "settlements"]), null);
+  assert.equal(gatewayPath("POST", ["orders", "finance", "refunds"]), null);
+  assert.equal(gatewayPath("POST", ["orders", "finance", "commission-rates"]), null);
+  assert.equal(gatewayPath("PATCH", ["orders", "not-a-uuid", "fulfillment"]), null);
+  assert.equal(gatewayPath("POST", ["orders", PRODUCT, "fulfillment"]), null);
   assert.equal(gatewayPath("POST", ["sellers", "seller-2", "approve"]), null);
   assert.equal(gatewayPath("GET", ["payments", PRODUCT]), null);
   assert.equal(gatewayPath("GET", ["products", "not-a-uuid"]), null);

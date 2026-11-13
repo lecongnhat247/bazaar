@@ -5,6 +5,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.bazaar.order.market.FulfillmentView;
+
+/**
+ * {@code total} is what the customer pays (after {@code discountTotal}). Every seller of the
+ * order has its own fulfillment group; {@code fulfillmentStatus} is derived from them.
+ */
 public record OrderResponse(
         UUID id,
         String customerId,
@@ -15,5 +21,9 @@ public record OrderResponse(
         List<ItemResponse> items,
         List<HistoryResponse> history,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        BigDecimal discountTotal,
+        String couponCode,
+        String fulfillmentStatus,
+        List<FulfillmentView> fulfillments) {
 }

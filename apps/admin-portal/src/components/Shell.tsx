@@ -19,8 +19,10 @@ const LINKS = [
   ["/products", "Products"],
   ["/categories", "Categories"],
   ["/campaigns", "Campaigns"],
+  ["/coupons", "Coupons"],
   ["/orders", "Orders"],
   ["/payments", "Payments"],
+  ["/finance", "Finance"],
   ["/audit", "Audit"],
 ];
 

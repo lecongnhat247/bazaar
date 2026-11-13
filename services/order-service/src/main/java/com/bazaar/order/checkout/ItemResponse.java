@@ -11,5 +11,6 @@ public record ItemResponse(
         BigDecimal unitPrice,
         int quantity,
         BigDecimal lineTotal,
-        UUID reservationId) {
+        UUID reservationId,
+        BigDecimal discount) {
 }
