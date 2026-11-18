@@ -969,11 +969,29 @@ class OrderTransactions {
     }
 
     private void fact(UUID orderId, String eventType, String status, Instant now) {
-        outbox.add(eventType, "order", orderId.toString(), orderId, java.util.Map.of(
-                "status", status,
-                "currency", latestCurrency(orderId),
-                "total", latestTotal(orderId).toPlainString(),
-                "customerId", latestCustomer(orderId)), now, orderTopic);
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("status", status);
+        payload.put("currency", latestCurrency(orderId));
+        payload.put("total", latestTotal(orderId).toPlainString());
+        payload.put("customerId", latestCustomer(orderId));
+        if ("CONFIRMED".equals(status)) {
+            payload.put("items", purchasedItems(orderId));
+        }
+        outbox.add(eventType, "order", orderId.toString(), orderId, payload, now, orderTopic);
+    }
+
+    private java.util.List<java.util.Map<String, Object>> purchasedItems(UUID orderId) {
+        return jdbc.query("""
+                SELECT product_id, quantity
+                FROM order_item
+                WHERE order_id = ?
+                ORDER BY product_id
+                """, (rs, row) -> {
+            java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("productId", rs.getObject("product_id", UUID.class).toString());
+            item.put("quantity", rs.getInt("quantity"));
+            return item;
+        }, orderId);
     }
 
     private static Map<String, Object> reservationCommand(UUID orderId, String customerId, UUID campaignId, List<Line> lines) {

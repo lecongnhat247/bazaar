@@ -48,7 +48,7 @@ Open http://localhost:3000 for the storefront and http://localhost:8080/actuator
 docker compose down
 ```
 
-`docker compose down` removes the containers and the `bazaar` network. Images stay on the machine. The named volume `bazaar-postgres-data` also stays, so the databases survive a restart. `bazaar-kafka-data` keeps the broker log. `docker compose down -v` deletes both volumes. The init script runs only when the Postgres volume is empty, so a password change in the init script needs a new volume. `notification-db-init` creates `notification_user` and `notification_db` when that volume already existed before the notification service.
+`docker compose down` removes the containers and the `bazaar` network. Images stay on the machine. The named volume `bazaar-postgres-data` also stays, so the databases survive a restart. `bazaar-kafka-data` keeps the broker log. `docker compose down -v` deletes both volumes. The init script runs only when the Postgres volume is empty, so a password change in the init script needs a new volume. `notification-db-init` creates `notification_user` and `notification_db` when that volume already existed before the notification service. `recommendation-db-init` does the same for `recommendation_user` and `recommendation_db`. The recommendation service listens on host port 8087 and reads catalog and order events after `kafka-init` finishes. Its readiness check is the database and does not include Kafka.
 
 ## Kafka
 

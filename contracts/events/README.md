@@ -28,10 +28,10 @@ A new required field needs a new `eventVersion`. Adding an optional field does n
 
 | Topic | Key | Partitions | Replication | Producer | Consumer |
 | --- | --- | --- | --- | --- | --- |
-| `bazaar.order.events` | order id | 3 | 1 | order service | order service group `order-service`, notification group `notification-service` |
+| `bazaar.order.events` | order id | 3 | 1 | order service | order service group `order-service`, notification group `notification-service`, recommendation group `recommendation-service` |
 | `bazaar.inventory.events` | reservation id | 3 | 1 | inventory service | inventory service group `inventory-service` |
 | `bazaar.payment.events` | payment id | 3 | 1 | payment service | payment service group `payment-service`, notification group `notification-service` |
-| `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service` |
+| `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service`, recommendation group `recommendation-service` |
 | `bazaar.inventory.commands` | order id or reservation id | 3 | 1 | order service | inventory group `inventory-commands` |
 | `bazaar.payment.commands` | order id or payment id | 3 | 1 | order service | payment group `payment-commands` |
 | `bazaar.dlq` | original key | 3 | 1 | the consumer that gave up | no business consumer |
@@ -49,12 +49,13 @@ Commands from the order service:
 
 Produced when the business row changes:
 
-- `order.pending-inventory`, `order.confirmed`, `order.payment-failed`, `order.cancelled`, `order.failed`. Payload: `status`, `currency`, `total`, `customerId`.
+- `order.pending-inventory`, `order.confirmed`, `order.payment-failed`, `order.cancelled`, `order.failed`. Payload: `status`, `currency`, `total`, `customerId`. `order.confirmed` also carries optional `items`: `productId` and `quantity`. Older confirmed events have no `items`.
 - `inventory.reservation-failed` and `inventory.commit-failed` when a command cannot be applied.
 - `payment.refunded` when a successful payment is compensated. Payload includes `customerId`.
 - `inventory.reserved`, `inventory.released`, `inventory.committed`, `inventory.expired`. Payload: `productId`, `quantity`, `status`.
 - `payment.succeeded`, `payment.failed`, `payment.cancelled`. Payload: `orderId`, `customerId`, `amount`, `currency`, `status`.
-- `catalog.product-published`, `catalog.product-unpublished`, `catalog.product-updated`. Payload: `name`, `sku`, `price`, `currency`, `status`.
+- `catalog.product-published`, `catalog.product-unpublished`, `catalog.product-updated`. Payload: `name`, `sku`, `price`, `currency`, `status`, and optional `categoryId` and `sellerId`.
+- `catalog.product-viewed` when an authenticated customer records a view of an active product. Payload: `customerId`, `name`, `status`, `categoryId`. No price. Anonymous reads do not emit it.
 
 Not produced: a stock quantity edit, a draft product create or edit, or a repeated call that does not change status. `inventory.reservation-failed` is produced when the reserve command cannot take stock. There is still no reservation row in that case.
 

@@ -23,3 +23,6 @@ CREATE DATABASE keycloak_db OWNER keycloak_user;
 
 CREATE USER notification_user WITH PASSWORD 'notification_local';
 CREATE DATABASE notification_db OWNER notification_user;
+
+CREATE USER recommendation_user WITH PASSWORD 'recommendation_local';
+CREATE DATABASE recommendation_db OWNER recommendation_user;

@@ -62,6 +62,10 @@ spring:
               uri: ${PAYMENT_SERVICE_URL:http://localhost:8085}
               predicates:
                 - Path=/api/v1/payments/**
+            - id: recommendations
+              uri: ${RECOMMENDATION_SERVICE_URL:http://localhost:8087}
+              predicates:
+                - Path=/api/v1/recommendations/**
 
 server:
   port: ${SERVER_PORT:8080}

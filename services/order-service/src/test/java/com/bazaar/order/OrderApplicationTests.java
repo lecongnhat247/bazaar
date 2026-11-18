@@ -1457,6 +1457,17 @@ class OrderApplicationTests {
         assertThat(reconciliation().balanced()).isTrue();
     }
 
+    @Test
+    void confirmedOrderEventNamesEachPurchasedProduct() throws Exception {
+        String id = confirmed("buyer-lines", "order-key-lines", null, LAMP, SHIRT);
+        String payload = jdbc.queryForObject(
+                "SELECT payload FROM outbox WHERE aggregate_id = ? AND event_type = 'order.confirmed'",
+                String.class,
+                id);
+        assertThat(payload).contains(LAMP.toString()).contains(SHIRT.toString()).contains("quantity");
+        assertThat(payload).doesNotContain("unitPrice");
+    }
+
     private String place(String customer, String key, String coupon, UUID... products) throws Exception {
         MvcResult result = attempt(customer, key, coupon, products);
         assertThat(result.getResponse().getStatus()).as(result.getResponse().getContentAsString()).isEqualTo(201);

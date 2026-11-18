@@ -115,6 +115,16 @@ A real status change to `SUCCEEDED`, `FAILED`, or `CANCELLED` inserts one `bazaa
 
 The service consumes `bazaar.order.events` and `bazaar.payment.events`. It stores `ORDER_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `ORDER_CONFIRMED`, and `ORDER_CANCELLED` for the `customerId` in the event. It does not read the order or payment databases. `GET /api/v1/notifications` returns the rows for the verified token subject. The socket joins `customer:{subject}` from that same token. The browser cannot pick a customer id. A disconnect does not delete the rows. Readiness is the database and does not include Kafka or Redis.
 
+## Recommendation Service
+
+| | |
+| --- | --- |
+| Technology | Python 3.14, FastAPI |
+| Port | 8080 in a container, 8087 as a published host port |
+| Data | PostgreSQL `recommendation_db`. No Redis. |
+
+The service consumes `bazaar.catalog.events` and `bazaar.order.events`. It stores each `eventId` once and folds those rows into popular, trending, related, and category lists. Recently viewed and `forYou` are returned only for the token subject. It does not read `catalog_db` or `order_db`. A copied price is not the checkout price. Readiness is the database and does not include Kafka or Keycloak. See [ADR-010](../adr/ADR-010-recommendation-read-model.md).
+
 ## Storefront
 
 | | |
@@ -138,11 +148,10 @@ The order page also opens a socket to the notification service with that cookie.
 
 ## Later services
 
-These services are not part of the current milestone and have no folders yet.
+Analytics is not part of the current milestone and has no folder yet. Recommendation is in the tree.
 
 | Service | Planned stack | Planned data |
 | --- | --- | --- |
-| Recommendation | Python and FastAPI | Read models derived from events |
 | Analytics | C# and .NET | SQL Server read models |
 
 Kafka remains the event bus between services when those flows exist. WebSocket is for browser delivery, not a substitute for the bus.

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useCart } from "@/components/CartProvider";
+import { RelatedProducts } from "@/components/Recommendations";
 import { money, priceText } from "@/lib/money";
 import styles from "@/app/shop.module.css";
 
@@ -45,6 +46,13 @@ export function ProductDetail({ id }: { id: string }) {
       });
     return () => controller.abort();
   }, [id]);
+
+  useEffect(() => {
+    if (state !== "ready") {
+      return;
+    }
+    void fetch(`/api/products/${id}/view`, { method: "POST" }).catch(() => undefined);
+  }, [id, state]);
 
   if (state === "loading") {
     return <section className={styles.page}><p className={styles.muted}>Loading product…</p></section>;
@@ -93,6 +101,7 @@ export function ProductDetail({ id }: { id: string }) {
         <Link className={styles.buttonQuiet} href="/cart">Go to cart</Link>
       </div>
       {notice ? <p className={styles.good}>{notice}</p> : null}
+      <RelatedProducts productId={id} />
     </section>
   );
 }

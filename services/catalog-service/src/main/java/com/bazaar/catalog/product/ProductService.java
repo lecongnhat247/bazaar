@@ -148,6 +148,27 @@ public class ProductService {
         return ProductResponse.from(product);
     }
 
+    @Transactional
+    public void recordView(Jwt jwt, UUID id) {
+        CatalogAccess access = CatalogAccess.from(jwt);
+        if (!access.customer()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a customer can record a product view.");
+        }
+        Product product = products.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found."));
+        if (product.getStatus() != ProductStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product was not found.");
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("customerId", access.subject());
+        payload.put("name", product.getName());
+        payload.put("status", product.getStatus().name());
+        if (product.getCategory() != null) {
+            payload.put("categoryId", product.getCategory().getId().toString());
+        }
+        outbox.add("catalog.product-viewed", "catalog", product.getId().toString(), product.getId(), payload, Instant.now());
+    }
+
     @Transactional(readOnly = true)
     public List<com.bazaar.catalog.api.ModerationResponse> moderation(Jwt jwt, UUID id) {
         CatalogAccess access = CatalogAccess.from(jwt);
@@ -282,12 +303,17 @@ public class ProductService {
     }
 
     private void catalogEvent(String eventType, Product product) {
-        outbox.add(eventType, "catalog", product.getId().toString(), product.getId(), Map.of(
-                "name", product.getName(),
-                "sku", product.getSku(),
-                "price", product.getPrice().toPlainString(),
-                "currency", product.getCurrency(),
-                "status", product.getStatus().name()), product.getUpdatedAt());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("name", product.getName());
+        payload.put("sku", product.getSku());
+        payload.put("price", product.getPrice().toPlainString());
+        payload.put("currency", product.getCurrency());
+        payload.put("status", product.getStatus().name());
+        payload.put("sellerId", product.getSellerId());
+        if (product.getCategory() != null) {
+            payload.put("categoryId", product.getCategory().getId().toString());
+        }
+        outbox.add(eventType, "catalog", product.getId().toString(), product.getId(), payload, product.getUpdatedAt());
     }
 
     private Product editable(Jwt jwt, UUID id) {

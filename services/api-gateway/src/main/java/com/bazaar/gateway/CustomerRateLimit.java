@@ -64,6 +64,9 @@ public class CustomerRateLimit {
         if (path.startsWith("/api/v1/payments")) {
             return "payments";
         }
+        if (path.startsWith("/api/v1/recommendations")) {
+            return "recommendations";
+        }
         if (path.startsWith("/api/v1/inventory")) {
             return "inventory";
         }

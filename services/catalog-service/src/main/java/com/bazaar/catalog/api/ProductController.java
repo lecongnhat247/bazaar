@@ -85,4 +85,10 @@ public class ProductController {
     public List<ModerationResponse> moderation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return products.moderation(jwt, id);
     }
+
+    @PostMapping("/{id}/views")
+    public ResponseEntity<Void> view(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        products.recordView(jwt, id);
+        return ResponseEntity.noContent().build();
+    }
 }

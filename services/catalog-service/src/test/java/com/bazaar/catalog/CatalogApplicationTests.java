@@ -371,6 +371,11 @@ class CatalogApplicationTests {
                         .content("{\"status\":\"ACTIVE\"}"))
                 .andExpect(status().isOk());
         assertThat(types(id)).containsExactly("catalog.product-published");
+        String published = jdbc.queryForObject(
+                "SELECT payload FROM outbox WHERE aggregate_id = ? AND event_type = 'catalog.product-published'",
+                String.class,
+                id);
+        assertThat(published).contains("8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d0002").contains("seller-outbox");
 
         mockMvc.perform(put("/api/v1/products/" + id)
                         .with(seller("seller-outbox"))
@@ -608,6 +613,24 @@ class CatalogApplicationTests {
                         .content("{\"name\":\"Staff Desk\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.slug").value("staff-desk"));
+    }
+
+    @Test
+    void customerViewOfAnActiveProductIsPublishedAndOtherCallersAreRefused() throws Exception {
+        String lamp = "8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1001";
+        String radio = "8f1c2a10-6b3e-4a1d-9c20-0a0b0c0d1003";
+        mockMvc.perform(post("/api/v1/products/" + lamp + "/views")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/products/" + lamp + "/views").with(seller("seller-view")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/products/" + lamp + "/views").with(customer("buyer-view")))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/v1/products/" + radio + "/views").with(customer("buyer-view")))
+                .andExpect(status().isNotFound());
+        String payload = jdbc.queryForObject(
+                "SELECT payload FROM outbox WHERE aggregate_id = ? AND event_type = 'catalog.product-viewed'",
+                String.class,
+                lamp);
+        assertThat(payload).contains("buyer-view").doesNotContain("price");
     }
 
     private static String productJson(String sellerId, String sku, String price) {

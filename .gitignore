@@ -44,3 +44,9 @@ kubeconfig
 
 # Packaged charts
 *.tgz
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc

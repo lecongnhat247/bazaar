@@ -25,6 +25,10 @@ public record CatalogAccess(String subject, Set<String> roles) {
         return admin() || roles.contains("SELLER");
     }
 
+    public boolean customer() {
+        return roles.contains("CUSTOMER");
+    }
+
     public static CatalogAccess from(Jwt jwt) {
         if (jwt == null || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
             return new CatalogAccess("", Set.of());

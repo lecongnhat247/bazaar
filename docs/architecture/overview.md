@@ -52,6 +52,8 @@ Phase 5 M3 adds Admin Portal at `apps/admin-portal` on port 3003. ADMIN and OPER
 
 Phase 5 M4 adds marketplace workflows to the order service. An order that holds several sellers' lines gets one fulfillment group per seller when it confirms, and each seller packs, ships, and delivers only its own group by hand. A coupon is a code; the server checks eligibility and calculates the discount, and a usage limit holds under concurrent checkouts. Money is an append-only ledger with a seller commission, reversal entries for cancellations and refunds, a mock settlement that can be replayed safely, and a reconciliation check. Nothing calls a real shipping, payment, or payout provider and no new Kafka topic is used. The decision is [ADR-009](../adr/ADR-009-marketplace-ledger-coupons-fulfillment.md). Seller Center shows fulfillment and earnings, and Admin Portal manages coupons, commission, settlement, and refund adjustments. The kind chart does not include those apps.
 
+Phase 5 M5 adds a Python recommendation service on port 8087. It folds catalog and order events into popular, trending, related, and category lists. A signed-in customer also gets recently viewed products and a short "for you" list built from their own purchases and views. The service does not read another database and does not set the checkout price. The decision is [ADR-010](../adr/ADR-010-recommendation-read-model.md). The kind chart does not include this service.
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

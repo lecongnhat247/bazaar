@@ -175,7 +175,7 @@ Java services set `logging.structured.format.console` to `ecs`. Each line includ
 
 ## Still later
 
-Seller and admin portals, recommendations, and analytics are not in this repository. Catalog data is PostgreSQL, not MongoDB. Notification, Kafka, Redis, and the per-service databases are already in Compose.
+Seller Center, Admin Portal, and the recommendation service are in this repository. The kind chart does not include them. Analytics is not in this repository. Catalog data is PostgreSQL, not MongoDB. Notification, Kafka, Redis, and the per-service databases are already in Compose.
 
 ```mermaid
 flowchart TB
