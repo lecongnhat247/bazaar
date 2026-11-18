@@ -64,6 +64,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M3 | Admin Portal | Complete |
 | M4 | Marketplace business workflows | Complete |
 | M5 | Recommendation service | Complete |
+| M6 | Analytics service | Complete |
 
 ## Documentation
 
@@ -96,6 +97,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [ADR-008 Seller profile in identity](docs/adr/ADR-008-seller-profile-in-identity.md)
 - [ADR-009 Marketplace ledger, coupons, fulfillment](docs/adr/ADR-009-marketplace-ledger-coupons-fulfillment.md)
 - [ADR-010 Recommendation read model](docs/adr/ADR-010-recommendation-read-model.md)
+- [ADR-011 Analytics read model](docs/adr/ADR-011-analytics-read-model.md)
 
 ## Planned applications
 
@@ -112,6 +114,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | Payment | `services/payment-service` | 8085 | 8080 |
 | Notification | `services/notification-service` | 8086 | 8080 |
 | Recommendation | `services/recommendation-service` | 8087 | 8080 |
+| Analytics | `services/analytics-service` | 8089 | 8080 |
 
 Inside Compose and Kubernetes every backend container listens on port 8080. The host ports above are for local processes and published Compose ports. Service-to-service calls use DNS names and port 8080.
 
@@ -133,6 +136,7 @@ Backend versions are pinned in the parent POM and the Maven Wrapper. The Next.js
 | Node.js / npm | 24.22.1 / 11.19.1 |
 | Next.js / React | 16.4.5 / 19.3.0, pinned by the storefront lockfile |
 | Python | 3.14.4, recommendation service image `python:3.14.4-slim-bookworm` |
+| .NET | 10.0.4, analytics image `mcr.microsoft.com/dotnet/sdk:10.0.404` and `aspnet:10.0.4` |
 | Maven | 3.10.0 through the Maven Wrapper |
 | Docker Engine / Compose | 29.9.2 / 5.6.1 |
 | kind / Kubernetes | 0.33.0 / 1.37.0 |

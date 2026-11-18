@@ -54,6 +54,8 @@ Phase 5 M4 adds marketplace workflows to the order service. An order that holds 
 
 Phase 5 M5 adds a Python recommendation service on port 8087. It folds catalog and order events into popular, trending, related, and category lists. A signed-in customer also gets recently viewed products and a short "for you" list built from their own purchases and views. The service does not read another database and does not set the checkout price. The decision is [ADR-010](../adr/ADR-010-recommendation-read-model.md). The kind chart does not include this service.
 
+Phase 5 M6 adds a .NET analytics service on port 8089. It folds order, payment, and catalog events into platform, seller, product, and flash-sale reports. It does not read another database. Commission is copied from the order event and is left unavailable when that snapshot is missing. Settlement stays unavailable because no settlement event exists. SQL Server starts only with Compose profile `analytics` and is not on the kind chart. The decision is [ADR-011](../adr/ADR-011-analytics-read-model.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

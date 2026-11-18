@@ -175,11 +175,11 @@ Java services set `logging.structured.format.console` to `ecs`. Each line includ
 
 ## Still later
 
-Seller Center, Admin Portal, and the recommendation service are in this repository. The kind chart does not include them. Analytics is not in this repository. Catalog data is PostgreSQL, not MongoDB. Notification, Kafka, Redis, and the per-service databases are already in Compose.
+Seller Center, Admin Portal, the recommendation service, and the analytics service are in this repository. The kind chart does not include them. SQL Server starts only with Compose profile `analytics` and is not on the kind chart. Catalog data is PostgreSQL, not MongoDB. Notification, Kafka, Redis, and the per-service databases are already in Compose.
 
 ```mermaid
 flowchart TB
-  subgraph later [Not built]
+  subgraph later [Not on the kind chart]
     seller[Seller portal]
     admin[Admin portal]
     recommend[Recommendation service]

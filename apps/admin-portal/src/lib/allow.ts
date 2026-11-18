@@ -53,6 +53,14 @@ export function gatewayPath(method: string, segments: string[]): string | null {
     || (method === "GET" && FINANCE_READ.has(path))
     || (method === "POST" && FINANCE_WRITE.has(path))
     || (method === "GET" && path === "payments/monitor")
-    || (method === "GET" && paymentId);
+    || (method === "GET" && paymentId)
+    || (method === "GET" && path === "analytics/platform/overview")
+    || (method === "GET" && path === "analytics/platform/sales")
+    || (method === "GET" && path === "analytics/platform/reconciliation")
+    || (method === "GET" && path === "analytics/products/performance")
+    || (method === "GET" && path === "analytics/products/categories")
+    || (method === "GET" && path === "analytics/flash-sales/performance")
+    || (method === "GET" && segments.length === 4 && segments[0] === "analytics" && segments[1] === "sellers" && SUBJECT.test(segments[2]) && segments[2] !== "me" && segments[3] === "sales")
+    || (method === "POST" && path === "analytics/rebuild");
   return allowed ? `/api/v1/${path}` : null;
 }

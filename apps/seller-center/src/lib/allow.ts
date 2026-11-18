@@ -25,6 +25,7 @@ export function gatewayPath(method: string, segments: string[]): string | null {
     || ((method === "GET" || method === "PUT") && stockId)
     || (method === "GET" && path === "orders/sales")
     || (method === "GET" && path === "orders/finance/me")
+    || (method === "GET" && path === "analytics/sellers/me/sales")
     || (method === "PATCH" && segments.length === 3 && segments[0] === "orders" && UUID.test(segments[1]) && segments[2] === "fulfillment")
     || (method === "GET" && path === "inventory/campaigns")
     || (method === "POST" && path === "inventory/campaigns")

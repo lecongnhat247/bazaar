@@ -66,6 +66,10 @@ spring:
               uri: ${RECOMMENDATION_SERVICE_URL:http://localhost:8087}
               predicates:
                 - Path=/api/v1/recommendations/**
+            - id: analytics
+              uri: ${ANALYTICS_SERVICE_URL:http://localhost:8089}
+              predicates:
+                - Path=/api/v1/analytics/**
 
 server:
   port: ${SERVER_PORT:8080}

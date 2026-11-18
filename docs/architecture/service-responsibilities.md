@@ -125,6 +125,16 @@ The service consumes `bazaar.order.events` and `bazaar.payment.events`. It store
 
 The service consumes `bazaar.catalog.events` and `bazaar.order.events`. It stores each `eventId` once and folds those rows into popular, trending, related, and category lists. Recently viewed and `forYou` are returned only for the token subject. It does not read `catalog_db` or `order_db`. A copied price is not the checkout price. Readiness is the database and does not include Kafka or Keycloak. See [ADR-010](../adr/ADR-010-recommendation-read-model.md).
 
+## Analytics Service
+
+| | |
+| --- | --- |
+| Technology | C# / ASP.NET Core on .NET 10 |
+| Port | 8080 in a container, 8089 as a published host port |
+| Data | SQL Server `analytics_db`, only when `ANALYTICS_SQL` is set. Otherwise a memory fold. |
+
+The service consumes `bazaar.order.events`, `bazaar.payment.events`, and `bazaar.catalog.events`. It stores each `eventId` once and folds those rows into platform, seller, product, and campaign reports. A seller sees only the subject in the token. Staff see the platform. Commission is the snapshot on `order.confirmed` and is not recomputed. Settlement is not on the event stream, so that report stays unavailable. It does not read `order_db`, `payment_db`, or `catalog_db`. Readiness is the database, or the memory store, and does not include Kafka or Keycloak. SQL Server is Compose profile `analytics` and is not on the kind chart. See [ADR-011](../adr/ADR-011-analytics-read-model.md).
+
 ## Storefront
 
 | | |
@@ -148,10 +158,4 @@ The order page also opens a socket to the notification service with that cookie.
 
 ## Later services
 
-Analytics is not part of the current milestone and has no folder yet. Recommendation is in the tree.
-
-| Service | Planned stack | Planned data |
-| --- | --- | --- |
-| Analytics | C# and .NET | SQL Server read models |
-
-Kafka remains the event bus between services when those flows exist. WebSocket is for browser delivery, not a substitute for the bus.
+The services named for this phase are in the tree. Kafka remains the event bus. WebSocket is for browser delivery, not a substitute for the bus.

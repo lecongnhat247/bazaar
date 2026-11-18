@@ -27,6 +27,11 @@ test("staff reads and admin writes stay on the portal routes", () => {
   assert.equal(gatewayPath("POST", ["orders", "finance", "refunds"]), "/api/v1/orders/finance/refunds");
   assert.equal(gatewayPath("GET", ["payments", "monitor"]), "/api/v1/payments/monitor");
   assert.equal(gatewayPath("GET", ["payments", ID]), `/api/v1/payments/${ID}`);
+  assert.equal(gatewayPath("GET", ["analytics", "platform", "overview"]), "/api/v1/analytics/platform/overview");
+  assert.equal(gatewayPath("GET", ["analytics", "platform", "sales"]), "/api/v1/analytics/platform/sales");
+  assert.equal(gatewayPath("GET", ["analytics", "flash-sales", "performance"]), "/api/v1/analytics/flash-sales/performance");
+  assert.equal(gatewayPath("GET", ["analytics", "sellers", "seller-1", "sales"]), "/api/v1/analytics/sellers/seller-1/sales");
+  assert.equal(gatewayPath("POST", ["analytics", "rebuild"]), "/api/v1/analytics/rebuild");
 });
 
 test("payment changes, checkout, and seller self-service are not proxied", () => {
@@ -48,4 +53,7 @@ test("payment changes, checkout, and seller self-service are not proxied", () =>
   assert.equal(gatewayPath("POST", ["products"]), null);
   assert.equal(gatewayPath("GET", ["identity", "users", "not-a-uuid"]), null);
   assert.equal(gatewayPath("GET", ["sellers", "..", "approve"]), null);
+  assert.equal(gatewayPath("GET", ["analytics", "sellers", "me", "sales"]), null);
+  assert.equal(gatewayPath("POST", ["analytics", "platform", "overview"]), null);
+  assert.equal(gatewayPath("GET", ["analytics", "sellers", "seller-1", "sales", "extra"]), null);
 });

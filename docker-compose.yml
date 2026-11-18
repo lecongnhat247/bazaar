@@ -75,6 +75,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:8080
       PAYMENT_SERVICE_URL: http://payment-service:8080
       RECOMMENDATION_SERVICE_URL: http://recommendation-service:8080
+      ANALYTICS_SERVICE_URL: http://analytics-service:8080
     depends_on:
       identity-service:
         condition: service_healthy
@@ -387,6 +388,52 @@ services:
     networks:
       - bazaar
 
+  sqlserver:
+    profiles: ["analytics"]
+    image: mcr.microsoft.com/mssql/server:2022-CU16-ubuntu-22.04
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Analytics_local1
+      MSSQL_PID: Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - analytics-sql:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    mem_limit: 1536m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
+  analytics-service:
+    profiles: ["analytics"]
+    build:
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
+    image: bazaar-analytics-service
+    ports:
+      - "8089:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ANALYTICS_SQL: Server=sqlserver,1433;User Id=sa;Password=Analytics_local1;Initial Catalog=master;TrustServerCertificate=True
+      KAFKA_BROKERS: kafka:19092
+      KEYCLOAK_ISSUER: http://localhost:8088/realms/bazaar
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/bazaar/protocol/openid-connect/certs
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - bazaar
+
   redis:
     image: redis:8.10.3-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
@@ -541,3 +588,5 @@ volumes:
     name: bazaar-postgres-data
   kafka-data:
     name: bazaar-kafka-data
+  analytics-sql:
+    name: bazaar-analytics-sql

@@ -139,11 +139,16 @@ class OrderTransactions {
                     Integer.class,
                     orderId);
             history(orderId, status, seq == null ? 1 : seq, now);
+            if ("CONFIRMED".equals(status)) {
+                settle(orderId, status, now);
+            }
             String type = eventType(status);
             if (type != null) {
                 fact(orderId, type, status, now);
             }
-            settle(orderId, status, now);
+            if (!"CONFIRMED".equals(status)) {
+                settle(orderId, status, now);
+            }
         }
         OrderRow latest = required(orderId);
         if (!status.equals(latest.status())) {
@@ -869,11 +874,16 @@ class OrderTransactions {
         }
         history(orderId, to, nextSeq(orderId), now);
         metrics.complete(to);
+        if ("CONFIRMED".equals(to)) {
+            settle(orderId, to, now);
+        }
         String type = eventType(to);
         if (type != null) {
             fact(orderId, type, to, now);
         }
-        settle(orderId, to, now);
+        if (!"CONFIRMED".equals(to)) {
+            settle(orderId, to, now);
+        }
         return true;
     }
 
@@ -975,22 +985,63 @@ class OrderTransactions {
         payload.put("total", latestTotal(orderId).toPlainString());
         payload.put("customerId", latestCustomer(orderId));
         if ("CONFIRMED".equals(status)) {
+            UUID campaignId = jdbc.query(
+                    "SELECT campaign_id FROM customer_order WHERE id = ?",
+                    rs -> rs.next() ? rs.getObject("campaign_id", UUID.class) : null,
+                    orderId);
+            if (campaignId != null) {
+                payload.put("campaignId", campaignId.toString());
+            }
             payload.put("items", purchasedItems(orderId));
+            java.util.List<java.util.Map<String, Object>> sellers = sellerSnapshots(orderId);
+            if (!sellers.isEmpty()) {
+                payload.put("sellers", sellers);
+            }
         }
         outbox.add(eventType, "order", orderId.toString(), orderId, payload, now, orderTopic);
     }
 
     private java.util.List<java.util.Map<String, Object>> purchasedItems(UUID orderId) {
         return jdbc.query("""
-                SELECT product_id, quantity
+                SELECT product_id, seller_id, product_name, unit_price, quantity, line_total, discount_amount
                 FROM order_item
                 WHERE order_id = ?
                 ORDER BY product_id
                 """, (rs, row) -> {
             java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
             item.put("productId", rs.getObject("product_id", UUID.class).toString());
+            item.put("sellerId", rs.getString("seller_id"));
+            item.put("productName", rs.getString("product_name"));
+            item.put("unitPrice", rs.getBigDecimal("unit_price").toPlainString());
             item.put("quantity", rs.getInt("quantity"));
+            item.put("lineTotal", rs.getBigDecimal("line_total").toPlainString());
+            item.put("discountAmount", rs.getBigDecimal("discount_amount").toPlainString());
             return item;
+        }, orderId);
+    }
+
+    private java.util.List<java.util.Map<String, Object>> sellerSnapshots(UUID orderId) {
+        return jdbc.query("""
+                SELECT seller_id,
+                       SUM(CASE WHEN account = 'SELLER_PAYABLE' AND entry_type = 'SALE' THEN amount ELSE 0 END) AS gross,
+                       SUM(CASE WHEN account = 'SELLER_PAYABLE' AND entry_type = 'DISCOUNT' THEN -amount ELSE 0 END) AS discount,
+                       SUM(CASE WHEN account = 'SELLER_PAYABLE' AND entry_type = 'COMMISSION' THEN -amount ELSE 0 END) AS commission,
+                       MAX(CASE WHEN account = 'SELLER_PAYABLE' AND entry_type = 'COMMISSION' THEN rate_bps END) AS rate_bps
+                FROM ledger_entry
+                WHERE order_id = ? AND entry_type <> 'REVERSAL'
+                GROUP BY seller_id
+                ORDER BY seller_id
+                """, (rs, row) -> {
+            java.util.Map<String, Object> seller = new java.util.LinkedHashMap<>();
+            seller.put("sellerId", rs.getString("seller_id"));
+            seller.put("gross", rs.getBigDecimal("gross").toPlainString());
+            seller.put("discount", rs.getBigDecimal("discount").toPlainString());
+            seller.put("commission", rs.getBigDecimal("commission").toPlainString());
+            int rate = rs.getInt("rate_bps");
+            if (!rs.wasNull()) {
+                seller.put("rateBps", rate);
+            }
+            return seller;
         }, orderId);
     }
 

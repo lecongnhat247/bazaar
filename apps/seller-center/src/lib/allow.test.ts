@@ -10,6 +10,7 @@ test("seller reads and writes stay on the seller routes", () => {
   assert.equal(gatewayPath("PATCH", ["sellers", "me", "store"]), "/api/v1/sellers/me/store");
   assert.equal(gatewayPath("GET", ["orders", "sales"]), "/api/v1/orders/sales");
   assert.equal(gatewayPath("GET", ["orders", "finance", "me"]), "/api/v1/orders/finance/me");
+  assert.equal(gatewayPath("GET", ["analytics", "sellers", "me", "sales"]), "/api/v1/analytics/sellers/me/sales");
   assert.equal(gatewayPath("PATCH", ["orders", PRODUCT, "fulfillment"]), `/api/v1/orders/${PRODUCT}/fulfillment`);
   assert.equal(gatewayPath("GET", ["products", PRODUCT]), `/api/v1/products/${PRODUCT}`);
   assert.equal(gatewayPath("PUT", ["inventory", "products", PRODUCT]), `/api/v1/inventory/products/${PRODUCT}`);
@@ -34,4 +35,7 @@ test("another seller, a customer order, and admin moderation are not proxied", (
   assert.equal(gatewayPath("GET", ["products", "not-a-uuid"]), null);
   assert.equal(gatewayPath("POST", ["inventory", "campaigns", PRODUCT, "reconcile"]), null);
   assert.equal(gatewayPath("GET", ["sellers", "..", "me"]), null);
+  assert.equal(gatewayPath("GET", ["analytics", "platform", "overview"]), null);
+  assert.equal(gatewayPath("GET", ["analytics", "sellers", "seller-2", "sales"]), null);
+  assert.equal(gatewayPath("POST", ["analytics", "rebuild"]), null);
 });

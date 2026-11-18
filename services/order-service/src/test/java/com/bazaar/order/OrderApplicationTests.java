@@ -1465,7 +1465,7 @@ class OrderApplicationTests {
                 String.class,
                 id);
         assertThat(payload).contains(LAMP.toString()).contains(SHIRT.toString()).contains("quantity");
-        assertThat(payload).doesNotContain("unitPrice");
+        assertThat(payload).contains("seller-1").contains("seller-2").contains("unitPrice").contains("commission");
     }
 
     private String place(String customer, String key, String coupon, UUID... products) throws Exception {

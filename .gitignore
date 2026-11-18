@@ -50,3 +50,7 @@ kubeconfig
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# .NET
+bin/
+obj/

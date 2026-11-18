@@ -28,10 +28,10 @@ A new required field needs a new `eventVersion`. Adding an optional field does n
 
 | Topic | Key | Partitions | Replication | Producer | Consumer |
 | --- | --- | --- | --- | --- | --- |
-| `bazaar.order.events` | order id | 3 | 1 | order service | order service group `order-service`, notification group `notification-service`, recommendation group `recommendation-service` |
+| `bazaar.order.events` | order id | 3 | 1 | order service | order service group `order-service`, notification group `notification-service`, recommendation group `recommendation-service`, analytics group `analytics-service` |
 | `bazaar.inventory.events` | reservation id | 3 | 1 | inventory service | inventory service group `inventory-service` |
-| `bazaar.payment.events` | payment id | 3 | 1 | payment service | payment service group `payment-service`, notification group `notification-service` |
-| `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service`, recommendation group `recommendation-service` |
+| `bazaar.payment.events` | payment id | 3 | 1 | payment service | payment service group `payment-service`, notification group `notification-service`, analytics group `analytics-service` |
+| `bazaar.catalog.events` | product id | 3 | 1 | catalog service | catalog service group `catalog-service`, recommendation group `recommendation-service`, analytics group `analytics-service` |
 | `bazaar.inventory.commands` | order id or reservation id | 3 | 1 | order service | inventory group `inventory-commands` |
 | `bazaar.payment.commands` | order id or payment id | 3 | 1 | order service | payment group `payment-commands` |
 | `bazaar.dlq` | original key | 3 | 1 | the consumer that gave up | no business consumer |
@@ -49,7 +49,7 @@ Commands from the order service:
 
 Produced when the business row changes:
 
-- `order.pending-inventory`, `order.confirmed`, `order.payment-failed`, `order.cancelled`, `order.failed`. Payload: `status`, `currency`, `total`, `customerId`. `order.confirmed` also carries optional `items`: `productId` and `quantity`. Older confirmed events have no `items`.
+- `order.pending-inventory`, `order.confirmed`, `order.payment-failed`, `order.cancelled`, `order.failed`. Payload: `status`, `currency`, `total`, `customerId`. `order.confirmed` also carries optional `campaignId`, optional `items`, and optional `sellers`. Each item has `productId`, `sellerId`, `productName`, `unitPrice`, `quantity`, `lineTotal`, and `discountAmount`. Older confirmed events may have only `productId` and `quantity`, or no `items` at all. Each seller snapshot has `sellerId`, `gross`, `discount`, `commission`, and optional `rateBps`. The commission is the absolute seller-payable amount from the order ledger. A missing `sellers` array means commission was not published. It does not mean zero.
 - `inventory.reservation-failed` and `inventory.commit-failed` when a command cannot be applied.
 - `payment.refunded` when a successful payment is compensated. Payload includes `customerId`.
 - `inventory.reserved`, `inventory.released`, `inventory.committed`, `inventory.expired`. Payload: `productId`, `quantity`, `status`.
@@ -83,7 +83,7 @@ Not produced: a stock quantity edit, a draft product create or edit, or a repeat
 }
 ```
 
-Money in a payload is a decimal string. The catalog remains the price authority for checkout.
+Money in a payload is a decimal string. The catalog remains the price authority for checkout. A current `order.confirmed` may also include `campaignId`, `items`, and `sellers`. Those fields are optional. Analytics copies them and does not recompute commission.
 
 ## Dead letters
 

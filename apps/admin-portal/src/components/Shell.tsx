@@ -23,6 +23,7 @@ const LINKS = [
   ["/orders", "Orders"],
   ["/payments", "Payments"],
   ["/finance", "Finance"],
+  ["/analytics", "Analytics"],
   ["/audit", "Audit"],
 ];
 
