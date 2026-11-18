@@ -56,6 +56,8 @@ Phase 5 M5 adds a Python recommendation service on port 8087. It folds catalog a
 
 Phase 5 M6 adds a .NET analytics service on port 8089. It folds order, payment, and catalog events into platform, seller, product, and flash-sale reports. It does not read another database. Commission is copied from the order event and is left unavailable when that snapshot is missing. Settlement stays unavailable because no settlement event exists. SQL Server starts only with Compose profile `analytics` and is not on the kind chart. The decision is [ADR-011](../adr/ADR-011-analytics-read-model.md).
 
+Phase 5 M7 connects those pieces. The storefront, Seller Center, and Admin Portal each call the gateway with the Keycloak cookie. CI tests the two desks, the recommendation service, and the analytics service, and publishes their images. The kind chart still schedules only the shop path. Seller Center, Admin Portal, recommendation, and analytics stay on Compose, and SQL Server stays off the cluster. The decision is [ADR-012](../adr/ADR-012-phase-5-integration-boundary.md).
+
 ## Principles
 
 1. The repository is a monorepo. Each service still builds and deploys on its own.

@@ -65,6 +65,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 | M4 | Marketplace business workflows | Complete |
 | M5 | Recommendation service | Complete |
 | M6 | Analytics service | Complete |
+| M7 | End-to-end integration | Complete |
 
 ## Documentation
 
@@ -98,6 +99,7 @@ BAZAAR is a multi-vendor marketplace. Phase 1 is the deployable skeleton. Phase 
 - [ADR-009 Marketplace ledger, coupons, fulfillment](docs/adr/ADR-009-marketplace-ledger-coupons-fulfillment.md)
 - [ADR-010 Recommendation read model](docs/adr/ADR-010-recommendation-read-model.md)
 - [ADR-011 Analytics read model](docs/adr/ADR-011-analytics-read-model.md)
+- [ADR-012 Phase 5 integration boundary](docs/adr/ADR-012-phase-5-integration-boundary.md)
 
 ## Planned applications
 

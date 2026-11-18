@@ -81,6 +81,9 @@ config:
   HOSTNAME: 0.0.0.0
   CORS_ORIGIN: http://localhost:3000
 
+# Seller Center, Admin Portal, the recommendation service, and the analytics
+# service are Compose workloads. SQL Server is not a chart resource. The kind
+# node does not schedule them.
 applications:
   api-gateway:
     image: bazaar-api-gateway

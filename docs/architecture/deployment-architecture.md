@@ -165,6 +165,8 @@ Image names:
 | Notification | `bazaar-notification-service` |
 | Storefront | `bazaar-storefront` |
 
+Seller Center, Admin Portal, recommendation, and analytics are published as `bazaar-seller-center`, `bazaar-admin-portal`, `bazaar-recommendation-service`, and `bazaar-analytics-service`. The chart does not schedule them.
+
 Remote names follow `ghcr.io/<owner>/bazaar-<application>:<tag>`. The owner and tag are Helm values.
 
 ## Logging and shutdown

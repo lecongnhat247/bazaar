@@ -48,9 +48,23 @@ export default function AnalyticsPage() {
   }
 
   useEffect(() => {
-    load("day");
-    // The first read uses the default grain. Later changes go through the buttons.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    api<Overview>("/api/backend/analytics/platform/overview")
+      .then((body) => { if (!cancelled) setOverview(body); })
+      .catch((caught: unknown) => { if (!cancelled) fail(caught, "The overview could not load."); });
+    api<Sales>("/api/backend/analytics/platform/sales?grain=day")
+      .then((body) => { if (!cancelled) setSales(body); })
+      .catch((caught: unknown) => { if (!cancelled) fail(caught, "Sales could not load."); });
+    api<Products>("/api/backend/analytics/products/performance")
+      .then((body) => { if (!cancelled) setProducts(body); })
+      .catch((caught: unknown) => { if (!cancelled) fail(caught, "Products could not load."); });
+    api<Flash>("/api/backend/analytics/flash-sales/performance")
+      .then((body) => { if (!cancelled) setFlash(body); })
+      .catch((caught: unknown) => { if (!cancelled) fail(caught, "Flash sales could not load."); });
+    api<Reconciliation>("/api/backend/analytics/platform/reconciliation")
+      .then((body) => { if (!cancelled) setReconciliation(body); })
+      .catch((caught: unknown) => { if (!cancelled) fail(caught, "Reconciliation could not load."); });
+    return () => { cancelled = true; };
   }, []);
 
   async function rebuild() {

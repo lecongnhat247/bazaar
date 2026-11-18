@@ -4,8 +4,8 @@ Three workflows live in `.github/workflows/`. They use `GITHUB_TOKEN`. No regist
 
 | Workflow | When it runs | What it does |
 | --- | --- | --- |
-| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront tests, lint, and production build, notification tests and build, Helm lint, release-tag checks, npm audit, and Trivy scans of the repository and of the eight images. Pull requests build the images and do not push them. |
-| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the eight images, scans them, and pushes them to GHCR only when the critical scan passes. |
+| `ci.yml` | Pull requests, and pushes to `main` | Maven tests, storefront, Seller Center, and Admin Portal tests, lint, and production builds, notification tests and build, recommendation and analytics tests, Helm lint, release-tag checks, npm audit, and Trivy scans of the repository and of the twelve images. Pull requests build the images and do not push them. |
+| `publish-images.yml` | Push to `main`, push of a `v*` tag, or a manual run | Builds the twelve images, scans them, and pushes them to GHCR only when the critical scan passes. |
 | `deploy.yml` | Manual run only | Renders the chart for an immutable tag. Applies it only for the `staging` environment when a kubeconfig secret exists. |
 
 A GitHub Release that creates a `v*` tag publishes images through the tag push. The publish workflow has no `pull_request` trigger and no `pull_request_target` trigger. A pull request from a fork cannot push images. The publish job also exits if it is ever invoked for a fork pull request.
@@ -16,7 +16,7 @@ Each job sets its own permissions. The workflow default is empty.
 
 | Job | Token permissions |
 | --- | --- |
-| Backend tests, storefront, notification service, Helm lint, dependency scan, pull-request image build, deploy validation | `contents: read` |
+| Backend tests, storefront, Seller Center, Admin Portal, notification, recommendation, analytics, Helm lint, dependency scan, pull-request image build, deploy validation | `contents: read` |
 | Image publish | `contents: read` and `packages: write` |
 | Cluster deploy | `contents: read`, and only after the `staging` environment is selected |
 
@@ -42,6 +42,10 @@ ghcr.io/<owner>/bazaar-<application>:<tag>
 | Payment | `ghcr.io/<owner>/bazaar-payment-service` |
 | Storefront | `ghcr.io/<owner>/bazaar-storefront` |
 | Notification | `ghcr.io/<owner>/bazaar-notification-service` |
+| Seller Center | `ghcr.io/<owner>/bazaar-seller-center` |
+| Admin Portal | `ghcr.io/<owner>/bazaar-admin-portal` |
+| Recommendation | `ghcr.io/<owner>/bazaar-recommendation-service` |
+| Analytics | `ghcr.io/<owner>/bazaar-analytics-service` |
 
 Tags:
 

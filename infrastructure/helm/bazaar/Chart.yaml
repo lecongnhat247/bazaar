@@ -1,6 +1,6 @@
 apiVersion: v2
 name: bazaar
-description: BAZAAR application chart. PostgreSQL, Kafka, Redis, and Keycloak stay outside the cluster.
+description: BAZAAR shop chart. PostgreSQL, Kafka, Redis, Keycloak, SQL Server, Seller Center, Admin Portal, and the recommendation and analytics services stay outside the cluster.
 type: application
 version: 0.1.0
 appVersion: 0.1.0-SNAPSHOT

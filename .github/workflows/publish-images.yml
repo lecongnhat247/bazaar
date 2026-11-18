@@ -48,6 +48,14 @@ jobs:
             dockerfile: apps/storefront/Dockerfile
           - name: notification-service
             dockerfile: services/notification-service/Dockerfile
+          - name: seller-center
+            dockerfile: apps/seller-center/Dockerfile
+          - name: admin-portal
+            dockerfile: apps/admin-portal/Dockerfile
+          - name: recommendation-service
+            dockerfile: services/recommendation-service/Dockerfile
+          - name: analytics-service
+            dockerfile: services/analytics-service/Dockerfile
     steps:
       - name: Refuse an untrusted pull request
         if: github.event_name == 'pull_request' || github.event.pull_request.head.repo.fork == true

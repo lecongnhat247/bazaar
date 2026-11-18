@@ -50,7 +50,7 @@ docker compose start
 
 ## What the chart creates
 
-Each application has one Deployment and one ClusterIP Service: API Gateway, Identity, Catalog, Inventory, Order, Payment, Notification, and Storefront. Service names match the Compose DNS names.
+Each application has one Deployment and one ClusterIP Service: API Gateway, Identity, Catalog, Inventory, Order, Payment, Notification, and Storefront. Service names match the Compose DNS names. Seller Center, Admin Portal, the recommendation service, and the analytics service are not in this list. `load-images.sh` does not load them. SQL Server is not a chart resource. Run those workloads with Compose, and do not run Compose beside this cluster.
 
 Addresses that are not secrets live in ConfigMap `bazaar-config`. Pods read the keys they need. The chart does not create a Secret. `imagePullSecrets` and `envFromSecret` name Secrets that an operator creates in the namespace. Database URLs and passwords stay in that Secret.
 

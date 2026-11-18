@@ -20,6 +20,8 @@ flowchart TB
     orders["order-service<br/>Spring Boot<br/>:8080"]
     payments["payment-service<br/>Spring Boot<br/>:8080"]
     notify["notification-service<br/>NestJS<br/>:8080"]
+    recommend["recommendation-service<br/>FastAPI<br/>:8080"]
+    analytics["analytics-service<br/>ASP.NET Core<br/>:8080"]
   end
 
   browser --> storefront
@@ -39,9 +41,11 @@ flowchart TB
   gateway -->|/api/v1/inventory/**| inventory
   gateway -->|/api/v1/orders/**| orders
   gateway -->|/api/v1/payments/**| payments
+  gateway -->|/api/v1/recommendations/**| recommend
+  gateway -->|/api/v1/analytics/**| analytics
 ```
 
-The ports in the internal tier are container ports. On a laptop, the Java processes bind 8081 through 8085 and the notification service is published on 8086. The browser socket does not pass through the gateway. See [deployment architecture](deployment-architecture.md).
+The ports in the internal tier are container ports. On a laptop, the Java processes bind 8081 through 8085, notification is published on 8086, recommendation on 8087, and analytics on 8089. Analytics and SQL Server start only with Compose profile `analytics`. The browser socket does not pass through the gateway. See [deployment architecture](deployment-architecture.md).
 
 ## Routes
 
@@ -55,6 +59,8 @@ The ports in the internal tier are container ports. On a laptop, the Java proces
 | `/api/v1/inventory/**` | `INVENTORY_SERVICE_URL` |
 | `/api/v1/orders/**` | `ORDER_SERVICE_URL` |
 | `/api/v1/payments/**` | `PAYMENT_SERVICE_URL` |
+| `/api/v1/recommendations/**` | `RECOMMENDATION_SERVICE_URL` |
+| `/api/v1/analytics/**` | `ANALYTICS_SERVICE_URL` |
 | `/actuator/health` on the gateway | Gateway process itself |
 
 Gateway route properties live under `spring.cloud.gateway.server.webflux.routes`.

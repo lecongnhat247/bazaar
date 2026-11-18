@@ -83,6 +83,99 @@ jobs:
           npm test
           npm run build
 
+  seller-center:
+    name: Seller Center
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/seller-center
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/seller-center/package-lock.json
+
+      - name: Install, test, lint, and build
+        run: |
+          npm ci
+          npm test
+          npm run lint
+          npm run build
+
+  admin-portal:
+    name: Admin Portal
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/admin-portal
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/admin-portal/package-lock.json
+
+      - name: Install, test, lint, and build
+        run: |
+          npm ci
+          npm test
+          npm run lint
+          npm run build
+
+  recommendation:
+    name: Recommendation service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/recommendation-service
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: services/recommendation-service/requirements.txt
+
+      - name: Test the read model
+        run: |
+          python -m pip install -r requirements.txt pytest httpx
+          python -m pytest -q
+
+  analytics:
+    name: Analytics service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test the read model
+        run: dotnet test services/analytics-service/tests/Analytics.Tests.csproj --nologo
+
   chart:
     name: Helm chart
     runs-on: ubuntu-latest
@@ -192,6 +285,14 @@ jobs:
             dockerfile: apps/storefront/Dockerfile
           - name: notification-service
             dockerfile: services/notification-service/Dockerfile
+          - name: seller-center
+            dockerfile: apps/seller-center/Dockerfile
+          - name: admin-portal
+            dockerfile: apps/admin-portal/Dockerfile
+          - name: recommendation-service
+            dockerfile: services/recommendation-service/Dockerfile
+          - name: analytics-service
+            dockerfile: services/analytics-service/Dockerfile
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
